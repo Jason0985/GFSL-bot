@@ -1,4 +1,4 @@
-"""Darstellung im Stil von Raid-Helper: Teams als Spalten mit Icons, Ersatzfahrer extra, Zähler unten."""
+"""Darstellung im Stil von Raid-Helper: Teams untereinander mit Icons, Ersatzfahrer extra, Zähler unten."""
 from datetime import datetime
 
 import discord
@@ -93,8 +93,8 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
     reserves = [k for k in assign.classes(d) if k["kind"] == "reserve"]
     team_by_id = {k["id"]: k for k in teams}
 
-    # Stammfahrer: 2 Teams pro Reihe, Abstand zwischen den Reihen
-    for n, team in enumerate(teams):
+    # Stammfahrer: jedes Team untereinander (auf Handy und iPad gleich), danach ein kleiner Abstand
+    for team in teams:
         # Feste Plätze: rechtzeitig angemeldete Stammfahrer
         lines = [entry(guild, uid, s, team["emoji"], hover) for uid, s in yes if s["class_id"] == team["id"] and not s.get("late")]
         # Eingeteilt: späte Stammfahrer im eigenen Team (Team-Icon) oder Ersatz/Fremde (🔁)
@@ -106,9 +106,9 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
         # Zu spät angemeldet und kein Platz: steht beim Team, zählt aber nicht
         lines += [entry(guild, uid, s, "🚫", hover) for uid, s in yes
                   if s["class_id"] == team["id"] and s.get("late") and uid not in ev["assignments"]]
-        embed.add_field(name=f"{team['emoji']} {team['name']} ({driving}/{team['seats']})"[:256], value=clip(lines), inline=True)
-        if n % 2 == 1 or n == len(teams) - 1:
-            spacer(embed)
+        # Unsichtbare letzte Zeile = kleiner Abstand zum nächsten Team (Leerzeilen kürzt Discord weg)
+        embed.add_field(name=f"{team['emoji']} {team['name']} ({driving}/{team['seats']})"[:256],
+                        value=clip(lines, 1022) + "\n" + SPACER, inline=False)
 
     # Ersatzfahrer: eigener Abschnitt
     for res in reserves:
