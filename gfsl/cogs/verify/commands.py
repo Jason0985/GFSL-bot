@@ -109,6 +109,30 @@ class VerifyCog(commands.Cog):
             return True
         return require_admin(interaction)
 
+    # ---------- Einmalig: fehlende Flagge/Plattform mit Deutschland/PlayStation füllen ----------
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Alle Fahrer ohne Flagge bzw. Plattform bekommen einmalig 🇩🇪 Deutschland bzw. PlayStation.
+        Wer etwas anderes hat, ändert es selbst mit /verify-profil. Läuft pro Server nur ein einziges Mal."""
+        for guild in self.bot.guilds:
+            d = data.get(guild.id)
+            if d.get("defaults_de_ps_done"):
+                continue
+            changed = 0
+            for drv in d["drivers"].values():
+                touched = False
+                if not drv.get("flag"):
+                    drv["flag"], touched = "Deutschland", True
+                if not drv.get("platform"):
+                    drv["platform"], touched = "PlayStation", True
+                changed += touched
+            d["defaults_de_ps_done"] = True
+            storage.save()
+            log.info("Standard Deutschland/PlayStation auf %s bei %d Fahrern eingetragen", guild.name, changed)
+            if changed:
+                self.schedule_refresh(guild, delay=2)
+
     # ---------- Fahrerliste bei Rollenwechsel aktualisieren ----------
 
     def schedule_refresh(self, guild: discord.Guild, delay: float = 10):
