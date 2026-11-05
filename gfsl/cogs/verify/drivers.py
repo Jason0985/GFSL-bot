@@ -77,9 +77,17 @@ def profile_value(d: dict, guild: discord.Guild | None, uid: str, key: str) -> s
     return d["drivers"].get(uid, {}).get(key)
 
 
-def driver_text(uid: str, flag: str | None, platform: str | None) -> str:
-    """„🇩🇪 @User (PC)“"""
-    parts = [lookup_flag(flag), f"<@{uid}>"]
+def display_name(uid: str, drv: dict, guild: discord.Guild | None = None) -> str:
+    """Name als normaler Text statt @Erwähnung: Erwähnungen in Embeds zeigt Discord nur an, wenn das Gerät
+    den User gerade geladen hat – sonst steht da „<@123…>“. Reihenfolge: Server-Name, gespeicherter Name, ID."""
+    member = guild.get_member(int(uid)) if guild else None
+    name = (member.display_name if member else None) or drv.get("name") or f"Unbekannt ({uid})"
+    return f"**{discord.utils.escape_markdown(name)}**"
+
+
+def driver_text(name: str, flag: str | None, platform: str | None) -> str:
+    """„🇩🇪 **User** (PC)“"""
+    parts = [lookup_flag(flag), name]
     if platform:
         parts.append(f"({discord.utils.escape_markdown(platform)})")
     return " ".join(p for p in parts if p)
@@ -88,12 +96,12 @@ def driver_text(uid: str, flag: str | None, platform: str | None) -> str:
 def driver_line(uid: str, drv: dict, d: dict | None = None, guild: discord.Guild | None = None) -> str:
     nr = drv["number"] if isinstance(drv.get("number"), int) else "–"
     if d is None:
-        return f"{nr}: {driver_text(uid, drv.get('flag'), drv.get('platform'))}"
-    return f"{nr}: {driver_text(uid, profile_value(d, guild, uid, 'flag'), profile_value(d, guild, uid, 'platform'))}"
+        return f"{nr}: {driver_text(display_name(uid, drv, guild), drv.get('flag'), drv.get('platform'))}"
+    return f"{nr}: {driver_text(display_name(uid, drv, guild), profile_value(d, guild, uid, 'flag'), profile_value(d, guild, uid, 'platform'))}"
 
 
 def list_lines(d: dict, guild: discord.Guild | None = None) -> list[str]:
-    """Alle Nummern untereinander: frei = leer, vergeben = Flagge @User (Plattform)."""
+    """Alle Nummern untereinander: frei = leer, vergeben = Flagge Name (Plattform)."""
     s = d["settings"]
     by_number = {drv["number"]: uid for uid, drv in d["drivers"].items() if isinstance(drv.get("number"), int)}
     lines = []
