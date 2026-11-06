@@ -3,7 +3,8 @@
 Ab der Anmeldefrist: freie Plätze eines Teams = Plätze - rechtzeitig angemeldete Stammfahrer des Teams.
 Wer einen freien Platz bekommt, entscheidet die Anmelde-Reihenfolge (wer zuerst angemeldet ist, fährt).
 Stammfahrer, die sich zu spät anmelden, verlieren ihren festen Platz: Sie reihen sich wie Ersatzfahrer
-hinten ein (bevorzugt ins eigene Team, falls dort noch frei) und verdrängen niemanden.
+hinten ein und verdrängen niemanden vom Fahren. Kommen sie noch rein und ist in ihrem Team noch ein Platz, fahren sie
+ihr eigenes Auto (mit Q-Sperre) – ein Ersatzfahrer, der dort saß, wird auf einen anderen freien Platz umverteilt.
 In welches Team ein Ersatzfahrer kommt, ist zufällig. Wer keinen Platz bekommt, landet unter „Keine Einteilung“.
 Spätere Änderungen werden nachgetragen, ohne bestehende Einteilungen unnötig umzuwerfen.
 """
@@ -21,17 +22,28 @@ def class_by_id(d: dict, class_id) -> dict | None:
     return next((c for c in classes(d) if c["id"] == class_id), None)
 
 
+def is_streamer(d: dict, class_id) -> bool:
+    c = class_by_id(d, class_id)
+    return bool(c and c["kind"] == "streamer")
+
+
 def class_for(member: discord.Member, d: dict) -> dict | None:
-    """Erste Klasse (in der eingestellten Reihenfolge), deren Rolle der Fahrer hat. Teams vor Ersatzfahrern."""
+    """Erste Fahrer-Klasse (in der eingestellten Reihenfolge), deren Rolle der Fahrer hat. Teams vor Ersatzfahrern."""
     ordered = [c for c in classes(d) if c["kind"] == "team"] + [c for c in classes(d) if c["kind"] == "reserve"]
     return next((c for c in ordered if member.get_role(c["role_id"])), None)
+
+
+def streamer_for(member: discord.Member, d: dict) -> dict | None:
+    """Streamer-Klasse, falls er die Rolle hat. Streamer fahren nicht und werden nie eingeteilt."""
+    return next((c for c in classes(d) if c["kind"] == "streamer" and member.get_role(c["role_id"])), None)
 
 
 def candidates(d: dict, ev: dict) -> list[str]:
     """Alle, die auf einen freien Platz warten: Ersatzfahrer und zu spät angemeldete Stammfahrer, nach Anmelde-Reihenfolge."""
     kinds = {c["id"]: c["kind"] for c in classes(d)}
     yes = {uid: s for uid, s in ev["signups"].items() if s["status"] == "yes" and s["class_id"] in kinds}
-    return sorted((uid for uid, s in yes.items() if kinds[s["class_id"]] == "reserve" or s.get("late")),
+    return sorted((uid for uid, s in yes.items() if kinds[s["class_id"]] == "reserve"
+                   or (s.get("late") and kinds[s["class_id"]] == "team")),
                   key=lambda u: yes[u]["order"])
 
 
@@ -49,19 +61,25 @@ def update(d: dict, ev: dict, rng: random.Random | None = None) -> list[tuple[st
 
     before = {uid: a["class_id"] for uid, a in ev["assignments"].items()}
     assigned = {}
+    now = time.time()
+    # Späte Stammfahrer, die fahren, bekommen zuerst ihr eigenes Auto (sofern im Team noch ein Platz ist)
+    for uid in drivers:
+        own = yes[uid]["class_id"]
+        if left.get(own, 0) > 0:
+            prev = ev["assignments"].get(uid)
+            assigned[uid] = prev if prev and prev["class_id"] == own else {"class_id": own, "at": now}
+            left[own] -= 1
     # Bisherige Plätze behalten, wenn möglich (Frühere zuerst)
     for uid in drivers:
         prev = ev["assignments"].get(uid)
-        if prev and left.get(prev["class_id"], 0) > 0:
+        if uid not in assigned and prev and left.get(prev["class_id"], 0) > 0:
             assigned[uid] = prev
             left[prev["class_id"]] -= 1
-    # Neue Plätze: späte Stammfahrer bevorzugt ins eigene Team, sonst ein zufälliger freier Platz
-    now = time.time()
+    # Neue Plätze: ein zufälliger freier Platz (das eigene Team späterer Stammfahrer ist dann schon voll)
     for uid in drivers:
         if uid in assigned:
             continue
-        own = yes[uid]["class_id"]
-        tid = own if left.get(own, 0) > 0 else rng.choice([t for t, n in left.items() for _ in range(n)])
+        tid = rng.choice([t for t, n in left.items() for _ in range(n)])
         assigned[uid] = {"class_id": tid, "at": now}
         left[tid] -= 1
 

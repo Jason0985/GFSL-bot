@@ -1,10 +1,10 @@
 """Ablauf eines Rennvorfalls (Ticket):
 
 1. „Vorfall melden“ -> privater Kanal für Einsender + Ligaleitung/Stewards
-2. Einsender öffnet (jederzeit, auch später) das Meldeformular: Beschuldigte, Vorfall, Beschreibung, Video/Links.
-   Danach „Einsendung abschicken“ -> Einsender wird entfernt, Beschuldigte werden hinzugeholt
-3. Jeder Beschuldigte (und von Stewards hinzugefügte Personen) füllt das Aussage-Formular aus und klickt
-   „Aussage abschicken“ -> wird danach entfernt. Kommt nichts: „Ohne Gegenclip bewerten“.
+2. Einsender füllt (jederzeit, auch später) das Meldeformular aus: Beschuldigte, Vorfall, Beschreibung, Video/Links.
+   Absenden ist endgültig -> Einsender wird entfernt, Beschuldigte werden hinzugeholt
+3. Jeder Beschuldigte (und von Stewards hinzugefügte Personen) füllt das Aussage-Formular aus.
+   Absenden ist endgültig -> wird danach entfernt. Kommt nichts: „Ohne Gegenclip bewerten“.
 4. Stewards beraten und tragen mit „Entscheidung eintragen“ die Entscheidung ein
    -> Ergebnis mit Links/Dateien im Ergebnis-Kanal, Verlauf als Thread im Archiv, Ticket-Kanal wird gelöscht
 
@@ -60,6 +60,18 @@ def add_log(t: dict, text: str):
     t["log"].append([now(), text])
 
 
+async def set_access(channel: discord.TextChannel, t: dict, uid: str, overwrite: discord.PermissionOverwrite, reason: str):
+    """Person ins Ticket holen bzw. rausnehmen. Ein Fehler bricht den Ablauf nicht ab, steht aber im Verlauf."""
+    member = channel.guild.get_member(int(uid))
+    if member is None:  # nicht (mehr) auf dem Server
+        return
+    try:
+        await channel.set_permissions(member, overwrite=overwrite, reason=reason)
+    except discord.HTTPException as e:
+        log.warning("Rechte für %s in Ticket #%s nicht gesetzt: %s", uid, t["id"], e)
+        add_log(t, f"⚠️ Rechte für <@{uid}> konnten nicht gesetzt werden – bitte manuell prüfen")
+
+
 # ---------- Panel ----------
 
 def panel_embed(s: dict) -> discord.Embed:
@@ -94,15 +106,12 @@ def instructions(t: dict) -> str:
     """Genau eine kurze Anleitung – nur für den, der gerade dran ist."""
     if t["phase"] == "reporter":
         return (f"**{mentions([t['reporter_id']])} – so geht's:**\n"
-                "1. **📝 Aussage eintragen:** Beschuldigte, Beschreibung, Video\n"
-                "2. Deine Meldung erscheint unten – kurz prüfen\n"
-                "3. **Einsendung endgültig abschicken**\n"
-                "-# Du kannst jederzeit später weitermachen. Nach dem Abschicken werden die Beschuldigten dazugeholt und du verlässt das Ticket.")
+                "**📝 Ausfüllen & abschicken:** Beschuldigte, Beschreibung, Video\n"
+                "-# Absenden ist endgültig: Danach werden die Beschuldigten dazugeholt und du verlässt das Ticket.")
     if t["phase"] == "statements":
         return (f"**{mentions(pending(t))} – ihr seid dran:**\n"
                 "1. Meldung unten lesen\n"
-                "2. **📝 Aussage eintragen:** deine Sicht + Video\n"
-                "3. **Aussage endgültig abschicken**\n"
+                "2. **📝 Ausfüllen & abschicken:** deine Sicht + Video – Absenden ist endgültig, danach verlässt du das Ticket\n"
                 "-# Stewards: Kommt kein Gegenclip, geht es mit „Ohne Gegenclip bewerten“ weiter.")
     if t["phase"] == "review":
         return ("**Ligaleitung & Stewards – alles da:**\n"
@@ -123,28 +132,26 @@ def control_embed(t: dict) -> discord.Embed:
 
 
 ACTIONS = {
-    "form": ("Aussage eintragen", discord.ButtonStyle.primary, "📝"),
-    "submit": ("Einsendung endgültig abschicken", discord.ButtonStyle.danger, None),
+    "form": ("Ausfüllen & abschicken", discord.ButtonStyle.primary, "📝"),
     "cancel": ("Abbrechen", discord.ButtonStyle.secondary, None),
-    "statement": ("Aussage endgültig abschicken", discord.ButtonStyle.danger, None),
     "skip": ("Ohne Gegenclip bewerten", discord.ButtonStyle.secondary, "⏭️"),
     "add": ("Person hinzufügen", discord.ButtonStyle.secondary, "➕"),
     "close": ("Entscheidung eintragen", discord.ButtonStyle.primary, "⚖️"),
 }
-PHASE_ACTIONS = {"reporter": ["form", "submit", "cancel"], "statements": ["form", "statement", "add", "skip"],
+PHASE_ACTIONS = {"reporter": ["form", "cancel"], "statements": ["form", "add", "skip"],
                  "review": ["add", "close"]}
 
 
 class TicketButton(discord.ui.DynamicItem[discord.ui.Button], template=r"rv:(?P<action>[a-z]+):(?P<t>\d+)"):
-    def __init__(self, action: str, tid: str, label: str | None = None):
-        default_label, style, emoji = ACTIONS[action]
-        label = label or default_label
+    def __init__(self, action: str, tid: str):
+        label, style, emoji = ACTIONS[action]
         super().__init__(discord.ui.Button(label=label, style=style, emoji=emoji, custom_id=f"rv:{action}:{tid}"))
         self.action, self.tid = action, tid
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(match["action"], match["t"])
+        # alte Übersichten haben noch eigene Abschicken-Buttons – die öffnen jetzt das Formular
+        return cls({"submit": "form", "statement": "form"}.get(match["action"], match["action"]), match["t"])
 
     async def callback(self, interaction: discord.Interaction):
         d = D.get(interaction.guild_id)
@@ -162,19 +169,8 @@ def status_view(t: dict) -> discord.ui.View | None:
         return None
     view = discord.ui.View(timeout=None)
     for a in actions:
-        view.add_item(TicketButton(a, t["id"], form_label(t) if a == "form" else None))
+        view.add_item(TicketButton(a, t["id"]))
     return view
-
-
-def form_label(t: dict) -> str:
-    """„Aussage eintragen“ beim ersten Mal, danach „Aussage anpassen“."""
-    who_fills = [t["reporter_id"]] if t["phase"] == "reporter" else pending(t)
-    done = [u in t["entries"] for u in who_fills]
-    if who_fills and all(done):
-        return "Aussage anpassen"
-    if any(done):
-        return "Aussage eintragen / anpassen"
-    return "Aussage eintragen"
 
 
 async def update_control(channel: discord.TextChannel, t: dict):
@@ -235,7 +231,7 @@ async def open_ticket(interaction: discord.Interaction):
     await interaction.followup.send(f"✅ Dein Ticket: {channel.mention}", ephemeral=True)
 
 
-# ---------- 2. Einsendung abschicken ----------
+# ---------- 2. Einsendung ----------
 
 class PickUsersView(discord.ui.View):
     """Auswahl von Personen (zum Hinzufügen durch die Stewards) mit Bestätigen-Button."""
@@ -270,32 +266,18 @@ async def on_form(interaction: discord.Interaction, d: dict, t: dict):
     await interaction.response.send_message("Für dich gibt es hier gerade kein Formular auszufüllen.", ephemeral=True)
 
 
-async def on_submit(interaction: discord.Interaction, d: dict, t: dict):
-    if str(interaction.user.id) != t["reporter_id"]:
-        return await interaction.response.send_message("Nur der Einsender kann die Einsendung abschicken.", ephemeral=True)
-    entry = t["entries"].get(t["reporter_id"])
-    if not entry:
-        return await interaction.response.send_message("Bitte fülle zuerst mit **📝 Aussage eintragen** die Meldung aus.", ephemeral=True)
-    accused = [m for u in entry["fields"]["accused"] if (m := interaction.guild.get_member(int(u)))]
-    if not accused:
-        return await interaction.response.send_message("Die Beschuldigten sind nicht (mehr) auf dem Server – bitte im Formular ändern.",
-                                                       ephemeral=True)
-    await interaction.response.send_message("✅ Abgeschickt. Du wirst jetzt aus dem Ticket entfernt – die Entscheidung der "
-                                            "Stewards wird im Ergebnis-Kanal veröffentlicht.", ephemeral=True)
-    async with lock(interaction.guild_id, t["id"]):
-        if t["phase"] != "reporter":
-            return
-        channel = interaction.channel
-        t["submitted"][t["reporter_id"]] = now()
-        t["accused"] = [str(m.id) for m in accused]
-        t["phase"] = "statements"
-        await channel.set_permissions(interaction.user, overwrite=REMOVED, reason="Einsendung abgeschickt")
-        for m in accused:
-            await channel.set_permissions(m, overwrite=PARTY, reason="Beschuldigt im Rennvorfall")
-        add_log(t, "Meldung abgeschickt, Beschuldigte dazugeholt")
-        await update_control(channel, t)
-        await ping(channel, t, "– ihr wurdet in diesem Rennvorfall gemeldet. Bitte die Meldung lesen und eure Aussage eintragen.",
-                   users=t["accused"])
+async def submit_report(channel: discord.TextChannel, t: dict):
+    """Meldung endgültig abgeschickt (aus dem Formular, im Lock): Einsender raus, Beschuldigte rein."""
+    t["submitted"][t["reporter_id"]] = now()
+    t["accused"] = t["entries"][t["reporter_id"]]["fields"]["accused"]
+    t["phase"] = "statements"
+    await set_access(channel, t, t["reporter_id"], REMOVED, "Einsendung abgeschickt")
+    for u in t["accused"]:
+        await set_access(channel, t, u, PARTY, "Beschuldigt im Rennvorfall")
+    add_log(t, "Meldung abgeschickt, Beschuldigte dazugeholt")
+    await update_control(channel, t)
+    await ping(channel, t, "– ihr wurdet in diesem Rennvorfall gemeldet. Bitte die Meldung lesen und eure Aussage abschicken.",
+               users=t["accused"])
 
 
 async def on_cancel(interaction: discord.Interaction, d: dict, t: dict):
@@ -321,23 +303,14 @@ async def to_review(channel: discord.TextChannel, d: dict, t: dict, by: str):
     await ping(channel, t, "– ⚖️ Rennvorfall bereit zur Bewertung.", roles=d["settings"]["staff_role_ids"])
 
 
-async def on_statement(interaction: discord.Interaction, d: dict, t: dict):
-    uid = str(interaction.user.id)
-    if uid not in pending(t):
-        return await interaction.response.send_message("Du hast hier nichts (mehr) abzuschicken.", ephemeral=True)
-    if uid not in t["entries"]:
-        return await interaction.response.send_message(
-            "Bitte fülle zuerst mit **📝 Aussage eintragen** deine Aussage aus. "
-            "Willst du nichts dazu sagen, schreib dort z. B. „Keine Aussage“.", ephemeral=True)
-    await interaction.response.send_message("✅ Aussage abgeschickt. Du wirst jetzt aus dem Ticket entfernt.", ephemeral=True)
-    async with lock(interaction.guild_id, t["id"]):
-        channel = interaction.channel
-        t["submitted"][uid] = now()
-        await channel.set_permissions(interaction.user, overwrite=REMOVED, reason="Aussage abgeschickt")
-        add_log(t, f"Aussage von <@{uid}> abgeschickt")
-        if not pending(t):
-            await to_review(channel, d, t, "Alle Aussagen sind da")
-        await update_control(channel, t)
+async def submit_statement(channel: discord.TextChannel, d: dict, t: dict, uid: str):
+    """Aussage endgültig abgeschickt (aus dem Formular, im Lock): Person raus."""
+    t["submitted"][uid] = now()
+    await set_access(channel, t, uid, REMOVED, "Aussage abgeschickt")
+    add_log(t, f"Aussage von <@{uid}> abgeschickt")
+    if not pending(t):
+        await to_review(channel, d, t, "Alle Aussagen sind da")
+    await update_control(channel, t)
 
 
 async def on_skip(interaction: discord.Interaction, d: dict, t: dict):
@@ -348,7 +321,7 @@ async def on_skip(interaction: discord.Interaction, d: dict, t: dict):
         channel = interaction.channel
         for uid in pending(t):
             t["skipped"].append(uid)
-            await channel.set_permissions(discord.Object(int(uid)), overwrite=REMOVED, reason="Ohne Gegenclip bewertet")
+            await set_access(channel, t, uid, REMOVED, "Ohne Gegenclip bewertet")
         await to_review(channel, d, t, f"Ohne Gegenclip weiter (<@{interaction.user.id}>) – Ausstehende entfernt")
         await update_control(channel, t)
 
@@ -366,11 +339,11 @@ async def on_add(interaction: discord.Interaction, d: dict, t: dict):
             channel = i.channel
             for u in new:
                 t["extra"].append(str(u.id))
-                await channel.set_permissions(u, overwrite=PARTY, reason="Zum Rennvorfall hinzugefügt")
+                await set_access(channel, t, str(u.id), PARTY, "Zum Rennvorfall hinzugefügt")
             t["phase"] = "statements"
             add_log(t, f"{', '.join(u.mention for u in new)} dazugeholt von <@{i.user.id}>")
             await update_control(channel, t)
-            await ping(channel, t, "– ihr wurdet zu diesem Rennvorfall dazugeholt. Bitte alles lesen und eure Aussage eintragen.",
+            await ping(channel, t, "– ihr wurdet zu diesem Rennvorfall dazugeholt. Bitte alles lesen und eure Aussage abschicken.",
                        users=[str(u.id) for u in new])
 
     await interaction.response.send_message("Wen möchtest du dazuholen (z. B. weitere Beteiligte oder für eine andere Sicht)?",
@@ -400,4 +373,4 @@ async def on_close(interaction: discord.Interaction, d: dict, t: dict):
     await interaction.response.send_modal(CloseModal(t["id"]))
 
 
-HANDLERS = {"form": on_form, "submit": on_submit, "cancel": on_cancel, "statement": on_statement, "skip": on_skip, "add": on_add, "close": on_close}
+HANDLERS = {"form": on_form, "cancel": on_cancel, "skip": on_skip, "add": on_add, "close": on_close}

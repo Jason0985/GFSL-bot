@@ -125,8 +125,9 @@ def set_signup(d: dict, ev: dict, uid: str, status: str, class_id: int, name: st
     if prev and prev["status"] == status and prev["class_id"] == class_id:
         return False, False
     after_deadline = tu.now() >= render.times(d, ev)["deadline"]
-    was_yes = bool(prev and prev["status"] == "yes")
-    late = status == "yes" and (prev.get("late", False) if was_yes else after_deadline)
+    # Streamer fahren nicht: keine Q-Sperre. Wer vom Streamer zum Fahrer wechselt, meldet sich als Fahrer neu an.
+    was_yes = bool(prev and prev["status"] == "yes" and not assign.is_streamer(d, prev["class_id"]))
+    late = status == "yes" and not assign.is_streamer(d, class_id) and (prev.get("late", False) if was_yes else after_deadline)
     if was_yes and status == "yes":
         order = prev["order"]  # nur die Klasse hat sich geändert
     else:
@@ -137,22 +138,60 @@ def set_signup(d: dict, ev: dict, uid: str, status: str, class_id: int, name: st
     return True, late and not (was_yes and prev.get("late"))
 
 
-async def signup(interaction: discord.Interaction, ev_id: str, status: str):
-    d = D.get(interaction.guild_id)
+def open_event(d: dict, ev_id: str) -> dict | None:
     ev = d["events"].get(ev_id)
     if not ev or ev["status"] != "posted" or tu.now() >= render.times(d, ev)["start"]:
+        return None
+    return ev
+
+
+class DriveOrStreamView(discord.ui.View):
+    """Nur für Mitglieder mit Fahrer- und Streamer-Rolle: kurze Rückfrage nach „Anmelden“."""
+
+    def __init__(self, ev_id: str, driver: dict, streamer: dict):
+        super().__init__(timeout=300)
+        for cls, label in ((driver, "Fahren"), (streamer, "Streamen")):
+            button = discord.ui.Button(label=f"{label} ({cls['name']})"[:80], emoji=cls["emoji"], style=discord.ButtonStyle.success)
+            button.callback = lambda i, c=cls: self.chosen(i, ev_id, c)
+            self.add_item(button)
+
+    async def chosen(self, interaction: discord.Interaction, ev_id: str, cls: dict):
+        d = D.get(interaction.guild_id)
+        ev = open_event(d, ev_id)
+        if ev is None:
+            return await interaction.response.edit_message(content="🔒 Die Anmeldung für dieses Event ist geschlossen.", view=None)
+        await do_signup(interaction, d, ev, "yes", cls, edit=True)
+
+
+async def signup(interaction: discord.Interaction, ev_id: str, status: str):
+    d = D.get(interaction.guild_id)
+    ev = open_event(d, ev_id)
+    if ev is None:
         return await interaction.response.send_message("🔒 Die Anmeldung für dieses Event ist geschlossen.", ephemeral=True)
     cls = assign.class_for(interaction.user, d)
-    if cls is None:
+    streamer = assign.streamer_for(interaction.user, d)
+    if cls is None and streamer is None:
         roles = ", ".join(f"<@&{c['role_id']}>" for c in assign.classes(d)) or "—"
         return await interaction.response.send_message(
             f"Du hast keine Rolle, mit der man sich anmelden kann ({roles}).", ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none())
+    if status == "yes" and cls and streamer:
+        return await interaction.response.send_message("Willst du bei diesem Rennen **fahren** oder **streamen**?", ephemeral=True,
+                                                       view=DriveOrStreamView(ev_id, cls, streamer))
+    await do_signup(interaction, d, ev, status, cls or streamer)
+
+
+async def do_signup(interaction: discord.Interaction, d: dict, ev: dict, status: str, cls: dict, edit: bool = False):
+    async def answer(text: str):
+        if edit:  # Antwort auf die Rückfrage Fahren/Streamen: diese Nachricht ersetzen
+            await interaction.response.edit_message(content=text, view=None)
+        else:
+            await interaction.response.send_message(text, ephemeral=True)
 
     uid = str(interaction.user.id)
     changed, late = set_signup(d, ev, uid, status, cls["id"], interaction.user.display_name)
     if not changed:
-        return await interaction.response.send_message(f"{STATUS_TEXT[status]} – das warst du schon.", ephemeral=True)
+        return await answer(f"{STATUS_TEXT[status]} – das warst du schon.")
     storage.save()
 
     deadline = render.times(d, ev)["deadline"]
@@ -162,7 +201,7 @@ async def signup(interaction: discord.Interaction, ev_id: str, status: str):
     if late:
         msg += (f"\n⚠️ Die Anmeldefrist ist abgelaufen (<t:{tu.ts(deadline)}:f>). "
                 "Du bist angemeldet, hast aber eine **Q-Sperre**." + lost_seat)
-    await interaction.response.send_message(msg, ephemeral=True)
+    await answer(msg)
     if late:
         try:
             await interaction.user.send(embed=discord.Embed(color=0xEF4444, description=(

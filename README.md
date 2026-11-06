@@ -217,10 +217,12 @@ Rollen und Nicknames werden beim Import **nicht** verändert. Die Plattform-Roll
 /anmeldung klasse neu rolle:@Haas art:Team emoji::haas:
 ...                                   (je Team eine)
 /anmeldung klasse neu rolle:@Ersatzfahrer art:Ersatzfahrer emoji::reserve:
+/anmeldung klasse neu rolle:@Streamer art:Streamer emoji:🎥
 /anmeldung vorlage erstellen name:Liga kanal:#anmeldung
 ```
 
 - **Klassen** sind die Rollen, mit denen man sich anmelden kann. Beim Anmelden schaut der Bot, welche Rolle der Fahrer hat, und sortiert ihn in die passende Spalte. Teams kommen vor Ersatzfahrern. Server-Emojis gehen als Icon (`:ferrari:` im Befehl tippen).
+- **Streamer** bekommen einen eigenen Abschnitt unter den Ersatzfahrern. Sie fahren nicht, werden nicht eingeteilt, haben keine Q-Sperre und zählen nicht in der Anwesenheit. Wer nur die Streamer-Rolle hat, wird mit **Anmelden** direkt als Streamer eingetragen. Wer Fahrer- und Streamer-Rolle hat, wird nach **Anmelden** kurz gefragt: **Fahren** oder **Streamen**. Per Befehl: `/anmeldung event teilnehmer … als_streamer:True`.
 - In der **Vorlage** steht alles, was bei jedem Rennen gleich ist:
   - Kanal der Anmeldung, Kanal für Info + Erinnerung (leer = derselbe) und Rollen, die dort erwähnt werden
   - Beschreibung und Bild (`/anmeldung vorlage bild`)
@@ -259,7 +261,7 @@ Rollen und Nicknames werden beim Import **nicht** verändert. Die Plattform-Roll
 5. **Einteilung:** Zur Frist werden die angemeldeten Ersatzfahrer auf die freien Cockpits verteilt (freie Plätze = Plätze minus angemeldete Stammfahrer).
    - **Wer zuerst angemeldet ist, bekommt zuerst einen Platz.** In welches Team er kommt, ist zufällig.
    - Wer keinen Platz bekommt, steht unten unter **„Keine Einteilung – alle Plätze belegt“** (in Anmelde-Reihenfolge) und rückt automatisch nach, wenn ein Platz frei wird.
-   - **Stammfahrer, die sich zu spät anmelden**, bekommen die Q-Sperre **und verlieren ihren festen Platz**: Sie reihen sich wie Ersatzfahrer hinten ein und verdrängen keinen schon eingeteilten Fahrer. Ist noch etwas frei, fahren sie (bevorzugt im eigenen Team), sonst stehen sie unter „Keine Einteilung“.
+   - **Stammfahrer, die sich zu spät anmelden**, bekommen die Q-Sperre **und verlieren ihren festen Platz**: Sie reihen sich wie Ersatzfahrer hinten ein und verdrängen keinen schon eingeteilten Fahrer. Ist noch etwas frei, fahren sie ihr eigenes Auto, falls dort noch ein Platz ist. Sitzt dort schon ein Ersatzfahrer, wird er auf einen anderen freien Platz umverteilt. Ist gar nichts mehr frei, stehen sie unter „Keine Einteilung“. Test der Einteilung: `python -m tests.test_assign`.
    - Darunter erscheint eine Extra-Nachricht mit der Einteilung, „Keine Einteilung“ und den Q-Sperren.
    - Meldet sich danach noch jemand an oder ab, wird automatisch nachgetragen, und die Betroffenen werden angepingt.
    - Stammfahrer auf „vielleicht“ zählen als nicht da, ihr Cockpit wird also vergeben.
@@ -301,14 +303,14 @@ Außerdem: `/rennvorfall einstellungen`, `/rennvorfall panel`, `/rennvorfall off
 ### Ablauf
 
 1. **Vorfall melden** → privater Kanal für den Einsender, die Ligaleitung und die Stewards, mit Status und Buttons.
-2. **Einsender** öffnet mit **📝 Aussage eintragen** das Meldeformular. Das geht **jederzeit, auch später**. Danach heißt der Button **📝 Aussage anpassen**, und er kann es beliebig oft ändern. Es enthält:
+2. **Einsender** öffnet mit **📝 Ausfüllen & abschicken** das Meldeformular. Das geht **jederzeit, auch später**. Es enthält:
    - **Beschuldigte** (Auswahl, mehrere möglich)
    - **Vorfallbeschreibung**
    - **Video-Links**
    - **Video/Screenshots** (Upload)
 
-   Der Bot zeigt die Meldung im Ticket an. Zusätzlich darf der Einsender im Kanal schreiben oder Dateien posten. Passt alles, klickt er den roten Button **Einsendung endgültig abschicken**. → Der Einsender wird entfernt, die Beschuldigten werden dazugeholt und angepingt.
-3. **Beschuldigte** füllen über **📝 Aussage eintragen** ihre Aussage aus (Text, Video-Links, Upload) und klicken den roten Button **Aussage endgültig abschicken**. → Jeder wird danach entfernt.
+   **Absenden ist endgültig** (keine zweite Bestätigung): Der Bot zeigt die Meldung im Ticket an, der Einsender wird entfernt, die Beschuldigten werden dazugeholt und angepingt.
+3. **Beschuldigte** füllen über **📝 Ausfüllen & abschicken** ihre Aussage aus (Text, Video-Links, Upload). Absenden ist endgültig → jeder wird danach entfernt.
    - **Person hinzufügen** (Stewards): weitere Beteiligte oder andere Sichten dazuholen. Für sie gilt derselbe Ablauf.
    - **Ohne Gegenclip bewerten** (Stewards): Kommt nichts mehr, werden alle Ausstehenden entfernt und es geht weiter.
 4. **Beratung:** Sind alle Teile da, werden die Stewards angepingt und können im Kanal diskutieren.

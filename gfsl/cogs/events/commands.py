@@ -18,7 +18,9 @@ log = logging.getLogger("gfsl.events")
 ADMIN = discord.Permissions(manage_guild=True)
 
 KIND_CHOICES = [app_commands.Choice(name="Team (Stammfahrer, feste Plätze)", value="team"),
-                app_commands.Choice(name="Ersatzfahrer (wird nach der Frist eingeteilt)", value="reserve")]
+                app_commands.Choice(name="Ersatzfahrer (wird nach der Frist eingeteilt)", value="reserve"),
+                app_commands.Choice(name="Streamer (fährt nicht, wird nicht eingeteilt)", value="streamer")]
+KIND_SHORT = {"team": "Team", "reserve": "Ersatz", "streamer": "Streamer"}
 STATUS_CHOICES = [app_commands.Choice(name="✅ angemeldet", value="yes"), app_commands.Choice(name="❔ vielleicht", value="maybe"),
                   app_commands.Choice(name="❌ abgemeldet", value="no"), app_commands.Choice(name="🗑️ Eintrag löschen", value="remove")]
 
@@ -47,7 +49,7 @@ async def template_autocomplete(interaction: discord.Interaction, current: str) 
 
 async def class_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     d = D.get(interaction.guild_id)
-    return [app_commands.Choice(name=f"{c['name']} ({'Team' if c['kind'] == 'team' else 'Ersatz'})"[:100], value=c["id"])
+    return [app_commands.Choice(name=f"{c['name']} ({KIND_SHORT[c['kind']]})"[:100], value=c["id"])
             for c in assign.classes(d) if current.lower() in c["name"].lower()][:25]
 
 
@@ -133,7 +135,7 @@ class EventsCog(commands.Cog):
         if not assign.classes(d):
             return await reply(interaction, "Noch keine. Lege sie mit `/anmeldung klasse neu` an – je Team eine und eine für Ersatzfahrer.")
         lines = [f"{c['emoji']} **{c['name']}** – <@&{c['role_id']}> · "
-                 + (f"Team, {c['seats']} Plätze" if c["kind"] == "team" else "Ersatzfahrer") for c in assign.classes(d)]
+                 + (f"Team, {c['seats']} Plätze" if c["kind"] == "team" else KIND_SHORT[c["kind"]]) for c in assign.classes(d)]
         await interaction.response.send_message(embed=discord.Embed(color=0x3B82F6, title="🏎️ Anmelde-Klassen", description="\n".join(lines)),
                                                 ephemeral=True)
 
@@ -432,8 +434,9 @@ class EventsCog(commands.Cog):
     @event.command(name="teilnehmer", description="Jemanden an-/abmelden (z. B. wenn er sich per Nachricht gemeldet hat)")
     @app_commands.choices(status=STATUS_CHOICES)
     @app_commands.autocomplete(eintrag=event_autocomplete)
+    @app_commands.describe(als_streamer="Als Streamer eintragen statt als Fahrer")
     async def teilnehmer(self, interaction: discord.Interaction, eintrag: str, fahrer: discord.Member,
-                         status: app_commands.Choice[str]):
+                         status: app_commands.Choice[str], als_streamer: bool = False):
         d = D.get(interaction.guild_id)
         ev = self.find_event(d, eintrag)
         if ev is None or ev["status"] not in ("posted", "closed"):
@@ -444,9 +447,9 @@ class EventsCog(commands.Cog):
             ev["assignments"].pop(uid, None)
             text = f"🗑️ {fahrer.mention} aus **{D.field(d, ev, 'title')}** entfernt."
         else:
-            cls = assign.class_for(fahrer, d)
+            cls = assign.streamer_for(fahrer, d) if als_streamer else (assign.class_for(fahrer, d) or assign.streamer_for(fahrer, d))
             if cls is None:
-                return await reply(interaction, f"{fahrer.mention} hat keine Anmelde-Rolle.")
+                return await reply(interaction, f"{fahrer.mention} hat keine passende Anmelde-Rolle.")
             _, late = actions.set_signup(d, ev, uid, status.value, cls["id"], fahrer.display_name)
             text = f"{actions.STATUS_TEXT[status.value]}: {fahrer.mention} bei **{D.field(d, ev, 'title')}**."
             if late:

@@ -8,7 +8,7 @@ from . import data as D
 def stats(guild: discord.Guild, d: dict, template_id: str | None = None) -> tuple[list[dict], int]:
     """Alle aktuellen Fahrer (Mitglieder mit einer Anmelde-Rolle) mit ihren Zahlen über alle abgeschlossenen Events."""
     events = [e for e in D.sorted_events(d, template_id) if e["status"] == "closed"]
-    members = {m.id: m for c in assign.classes(d) if (role := guild.get_role(c["role_id"])) for m in role.members if not m.bot}
+    members = {m.id: m for c in assign.classes(d) if c["kind"] != "streamer" and (role := guild.get_role(c["role_id"])) for m in role.members if not m.bot}
     rows = []
     for mid, member in members.items():
         uid = str(mid)

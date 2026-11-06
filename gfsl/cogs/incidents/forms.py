@@ -1,7 +1,6 @@
 """Formulare im Ticket: Meldung (Einsender) und Aussage (Beschuldigte/Hinzugefügte).
 
-Das Formular lässt sich jederzeit öffnen und beliebig oft ändern. Jede Eingabe ersetzt den bisherigen Eintrag im Ticket.
-Abgeschickt wird erst mit dem roten Button „Einsendung endgültig abschicken“ bzw. „Aussage endgültig abschicken“.
+Absenden ist endgültig: Der Eintrag erscheint im Ticket, der Absender wird entfernt (beim Einsender kommen die Beschuldigten dazu).
 """
 import discord
 
@@ -9,7 +8,7 @@ from gfsl import storage
 
 from . import data as D
 from .publish import URL_RE, download
-from .ticket import add_log, lock, now, pending, update_control
+from .ticket import lock, now, pending, submit_report, submit_statement
 
 
 def entry_embed(guild: discord.Guild, t: dict, uid: str, kind: str, fields: dict, links: list[str],
@@ -53,20 +52,23 @@ class EntryForm(discord.ui.Modal):
         self.add_item(discord.ui.Label(text="Vorfallbeschreibung" if report else "Deine Aussage", component=self.text))
         self.add_item(discord.ui.Label(text="Video-Links (YouTube o. ä.)", component=self.links))
         self.add_item(discord.ui.Label(text="Video / Screenshots (optional)", component=self.files,
-                                       description="Leer = bisherige Dateien bleiben · große Videos bitte als Link"))
+                                       description="Große Videos bitte als Link"))
+        self.add_item(discord.ui.TextDisplay("⚠️ **Absenden ist endgültig** – danach kannst du nichts mehr ändern und verlässt das Ticket."))
 
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         d = D.get(guild.id)
         t = d["tickets"].get(self.tid)
         report = self.kind == "report"
-        allowed = t and ((report and t["phase"] == "reporter") or (not report and t["phase"] == "statements" and self.uid in pending(t)))
-        if not allowed:
+        def allowed():
+            return t and ((report and t["phase"] == "reporter") or (not report and t["phase"] == "statements" and self.uid in pending(t)))
+
+        if not allowed():
             return await interaction.response.send_message("Das Formular kann in diesem Schritt nicht mehr gespeichert werden.", ephemeral=True)
 
         fields = {"text": self.text.value.strip(), "links": self.links.value.strip()}
         if report:
-            accused = [u for u in self.accused.values if not u.bot and str(u.id) != self.uid]
+            accused = [u for u in self.accused.values if not u.bot and str(u.id) != self.uid and guild.get_member(u.id)]
             if not accused:
                 return await interaction.response.send_message("❌ Bitte mindestens einen Beschuldigten (nicht dich selbst) auswählen.",
                                                                ephemeral=True)
@@ -79,6 +81,8 @@ class EntryForm(discord.ui.Modal):
 
         channel = interaction.channel
         async with lock(guild.id, self.tid):
+            if not allowed():  # doppelt abgeschickt
+                return await interaction.followup.send("Das wurde schon abgeschickt.", ephemeral=True)
             old = t["entries"].get(self.uid)
             uploads = list(self.files.values)
             if not uploads and old:  # nichts Neues hochgeladen: bisherige Dateien übernehmen
@@ -97,13 +101,13 @@ class EntryForm(discord.ui.Modal):
             if msg is None:
                 msg = await channel.send(embed=embed, files=files, allowed_mentions=discord.AllowedMentions.none())
             t["entries"][self.uid] = {"message_id": msg.id, "at": now(), "fields": fields, "links": links}
-            what = "Meldung" if report else "Aussage"
-            add_log(t, f"{what} von <@{self.uid}> {'geändert' if old else 'eingetragen'}")
-            await update_control(channel, t)
+            if report:
+                await submit_report(channel, t)
+            else:
+                await submit_statement(channel, d, t, self.uid)
             storage.save()
 
-        button = "Einsendung endgültig abschicken" if report else "Aussage endgültig abschicken"
-        text = f"✅ Gespeichert – steht jetzt im Ticket. Passt alles? Dann oben **{button}**."
+        text = "✅ Abgeschickt. Du wirst jetzt aus dem Ticket entfernt – die Entscheidung der Stewards wird im Ergebnis-Kanal veröffentlicht."
         if too_big:
             text += (f"\n⚠️ Zu groß zum Anhängen (max. {guild.filesize_limit // 1_048_576} MB): "
                      + ", ".join(a.filename for a in too_big) + " – bitte als YouTube-Link angeben.")

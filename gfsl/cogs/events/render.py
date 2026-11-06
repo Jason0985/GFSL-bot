@@ -91,6 +91,7 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
     yes = [(uid, s) for uid, s in signups if s["status"] == "yes"]
     teams = [k for k in assign.classes(d) if k["kind"] == "team"]
     reserves = [k for k in assign.classes(d) if k["kind"] == "reserve"]
+    streamers = [k for k in assign.classes(d) if k["kind"] == "streamer"]
     team_by_id = {k["id"]: k for k in teams}
 
     # Stammfahrer: jedes Team untereinander (auf Handy und iPad gleich), danach ein kleiner Abstand
@@ -121,6 +122,11 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
             lines.append(entry(guild, uid, s, res["emoji"], hover) + marker)
         spacer(embed)  # Abstand zwischen Stammfahrern und Ersatzfahrern
         embed.add_field(name=f"{res['emoji']} {res['name']} ({len(lines)})"[:256], value=clip(lines), inline=False)
+
+    for st in streamers:
+        lines = [entry(guild, uid, s, st["emoji"], hover) for uid, s in yes if s["class_id"] == st["id"]]
+        spacer(embed)
+        embed.add_field(name=f"{st['emoji']} {st['name']} ({len(lines)})"[:256], value=clip(lines), inline=False)
 
     for status, label in (("maybe", "❔ Vielleicht"), ("no", "❌ Abgemeldet")):
         people = [f"{number(s, hover)} **{name_of(guild, uid, s)}**" for uid, s in signups if s["status"] == status]
