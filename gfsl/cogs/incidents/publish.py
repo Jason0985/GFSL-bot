@@ -1,4 +1,5 @@
-"""Entscheidung eintragen: Entscheidung veröffentlichen (mit Links + Dateien), Verlauf ins Archiv kopieren, Ticket löschen."""
+"""Entscheidung eintragen: Entscheidung veröffentlichen (mit Links + Dateien), Verlauf ins Archiv kopieren, Ticket löschen.
+Nachträglich ändern geht über den Button im Archiv (edit.py)."""
 import asyncio
 import io
 import logging
@@ -50,7 +51,13 @@ async def download(attachments: list[discord.Attachment], limit: int) -> tuple[l
     return ok, too_big
 
 
-def summary_embed(t: dict, guild: discord.Guild, links: list[tuple[str, str]], too_big: list[discord.Attachment]) -> discord.Embed:
+def too_big_text(attachments: list[discord.Attachment]) -> list[str]:
+    return [f"{a.filename} ({a.size / 1_048_576:.0f} MB)" for a in attachments]
+
+
+def summary_embed(t: dict) -> discord.Embed:
+    """Entscheidung für den Ergebnis-Kanal. Links und zu große Dateien stehen im Ticket (result_links/result_too_big),
+    damit die Nachricht später beim Bearbeiten genauso neu gebaut werden kann."""
     desc = f"**Entscheidung:**\n{t['decision']}"
     if t["penalty"]:
         desc += f"\n\n**Strafe(n):**\n{t['penalty']}"
@@ -61,12 +68,23 @@ def summary_embed(t: dict, guild: discord.Guild, links: list[tuple[str, str]], t
         embed.add_field(name="Hinzugefügt", value=", ".join(f"<@{u}>" for u in t["extra"]), inline=True)
     embed.add_field(name="Gemeldet", value=f"<t:{t['opened_at']}:f>", inline=True)
     embed.add_field(name="Entschieden", value=f"<t:{t['closed_at']}:f>", inline=True)
-    if links:
-        lines = [f"• [Video]({url}) von <@{uid}>" for uid, url in dict.fromkeys(links)]
+    if t.get("closed_by"):
+        embed.add_field(name="Eingetragen von", value=f"<@{t['closed_by']}>", inline=True)
+    if t.get("edited_by"):
+        embed.add_field(name="Zuletzt geändert", value=f"<@{t['edited_by']}> · <t:{t['edited_at']}:f>", inline=True)
+    if links := t.get("result_links"):
+        lines = [f"• [Video]({url})" + (f" von <@{uid}>" if uid else "") for uid, url in links]
         embed.add_field(name="🎥 Videos & Links", value="\n".join(lines)[:1024], inline=False)
-    if too_big:
-        embed.add_field(name="⚠️ Zu groß zum Anhängen", inline=False,
-                        value="\n".join(f"• {a.filename} ({a.size / 1_048_576:.0f} MB)" for a in too_big)[:1024])
+    if too_big := t.get("result_too_big"):
+        embed.add_field(name="⚠️ Zu groß zum Anhängen", inline=False, value="\n".join(f"• {x}" for x in too_big)[:1024])
+    return embed
+
+
+def internal_embed(t: dict) -> discord.Embed:
+    """Wie die Entscheidung, dazu der Verlauf – steht oben im Archiv."""
+    embed = summary_embed(t)
+    embed.add_field(name="🕒 Verlauf", inline=False,
+                    value="\n".join(f"<t:{ts}:f> · {text}" for ts, text in t["log"])[-1024:])
     return embed
 
 
@@ -143,17 +161,22 @@ def thread_name(guild: discord.Guild, t: dict) -> str:
 
 async def archive(guild: discord.Guild, t: dict, s: dict, messages, summary: discord.Embed) -> tuple[str | None, bool]:
     """Legt den Archiv-Thread an. Gibt (Link, alle Dateien archiviert?) zurück."""
+    from .edit import archive_view  # edit importiert publish, daher erst hier
     channel = guild.get_channel(s["archive_channel_id"] or 0)
     if channel is None:
         return None, False
     name = thread_name(guild, t)
     file = transcript(messages, t)
     if isinstance(channel, discord.ForumChannel):
-        thread = (await channel.create_thread(name=name, embed=summary, file=file,
-                                              allowed_mentions=discord.AllowedMentions.none())).thread
+        post = await channel.create_thread(name=name, embed=summary, file=file, view=archive_view(t),
+                                           allowed_mentions=discord.AllowedMentions.none())
+        thread, starter = post.thread, post.message
     else:
-        starter = await channel.send(embed=summary, file=file, allowed_mentions=discord.AllowedMentions.none())
+        starter = await channel.send(embed=summary, file=file, view=archive_view(t), allowed_mentions=discord.AllowedMentions.none())
         thread = await starter.create_thread(name=name, auto_archive_duration=10080)
+    # Für „Entscheidung bearbeiten“: wo die Übersicht und der Thread im Archiv stehen
+    t["archive_message"] = [starter.channel.id, starter.id]
+    t["archive_thread_id"] = thread.id
     entry_ids = {e["message_id"] for e in t["entries"].values()}
     messages = [m for m in messages if m.id != t.get("status_message_id")]  # die Übersicht oben nicht mitkopieren
     missing = await copy_to_archive(thread, messages, guild.me.id, guild.filesize_limit, entry_ids)
@@ -181,7 +204,9 @@ async def close_ticket(interaction: discord.Interaction, tid: str, decision: str
         messages, links, attachments = await collect(channel, t)
         results = guild.get_channel(s["result_channel_id"] or 0)
         files, too_big = await download(attachments, guild.filesize_limit)
-        summary = summary_embed(t, guild, links, too_big)
+        t["result_links"] = [list(x) for x in dict.fromkeys(links)]
+        t["result_too_big"] = too_big_text(too_big)
+        summary = summary_embed(t)
         result_url = None
         if results:
             pings = " ".join(f"<@{u}>" for u in [t["reporter_id"], *t["accused"]])
@@ -194,15 +219,15 @@ async def close_ticket(interaction: discord.Interaction, tid: str, decision: str
                     for i in range(0, len(files), 10):
                         await post.thread.send(files=files[i:i + 10])
                     result_url = post.thread.jump_url
+                    t["result_message"] = [post.thread.id, post.message.id]
                 else:
-                    result_url = (await send_with_files(results, files, **kwargs)).jump_url
+                    first = await send_with_files(results, files, **kwargs)
+                    result_url = first.jump_url
+                    t["result_message"] = [results.id, first.id]
             except discord.HTTPException as e:
                 log.warning("Entscheidung #%s nicht veröffentlicht: %s", t["id"], e)
 
-        internal = summary_embed(t, guild, links, too_big)
-        internal.add_field(name="🕒 Verlauf", inline=False,
-                           value="\n".join(f"<t:{ts}:f> · {text}" for ts, text in t["log"])[-1024:])
-        archive_url, complete = await archive(guild, t, s, messages, internal)
+        archive_url, complete = await archive(guild, t, s, messages, internal_embed(t))
         storage.save()
 
     notes = [f"✅ Entscheidung veröffentlicht: {result_url}" if result_url else "⚠️ Entscheidung nicht veröffentlicht – Ergebnis-Kanal fehlt oder mir fehlen dort Rechte (siehe `/rennvorfall einstellungen`)."]

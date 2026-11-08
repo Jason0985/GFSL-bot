@@ -41,6 +41,7 @@ gfsl/
       ticket.py             Ablauf im Ticket: Einsender → Beschuldigte → Stewards, Befangenheit, Buttons
       forms.py              Meldeformular und Stellungnahme-Formular
       publish.py            Entscheidung veröffentlichen, Verlauf ins Archiv kopieren
+      edit.py               Entscheidung nachträglich ändern (Button im Archiv)
       timeutil.py, data.py  deutsche Zeit (Sommer-/Winterzeit), gespeicherte Daten
       review.py             Mod-Kanal: Antrag mit Akzeptieren/Ablehnen
       drivers.py            Fahrernummern, Nicknames, Fahrerliste
@@ -313,11 +314,13 @@ Außerdem: `/rennvorfall einstellungen`, `/rennvorfall panel`, `/rennvorfall off
 3. **Beschuldigte** füllen über **📝 Ausfüllen & abschicken** ihre Aussage aus (Text, Video-Links, Upload). Absenden ist endgültig → jeder wird danach entfernt.
    - **Person hinzufügen** (Stewards): weitere Beteiligte oder andere Sichten dazuholen. Für sie gilt derselbe Ablauf.
    - **Ohne Gegenclip bewerten** (Stewards): Kommt nichts mehr, werden alle Ausstehenden entfernt und es geht weiter.
+   - **🚪 Alle Beteiligten entfernen** (Stewards, mit Rückfrage): Nimmt Einsender, Beschuldigte, Hinzugefügte und von Hand reingeholte Nicht-Stewards aus dem Kanal. Wer noch keine Aussage hat, gilt als „ohne Aussage“. Zurückholen geht mit „Person hinzufügen“.
 4. **Beratung:** Sind alle Teile da, werden die Stewards angepingt und können im Kanal diskutieren.
 5. **⚖️ Entscheidung eintragen** (Stewards): Entscheidung und Strafe(n) als Freitext eintragen. Danach:
-   - Im Ergebnis-Kanal erscheint die **FIA-Entscheidung**. Einsender und Beschuldigte werden erwähnt, die Videos/Links (als „Video von …“) stehen in der Entscheidung, Dateien folgen darunter.
+   - Im Ergebnis-Kanal erscheint die **FIA-Entscheidung**. Einsender und Beschuldigte werden erwähnt, die Videos/Links (als „Video von …“) stehen in der Entscheidung, Dateien folgen darunter. Unter „Eingetragen von“ steht, wer die Entscheidung eingetragen hat.
    - Im Archiv entsteht ein **Thread** mit dem kompletten Verlauf (Uhrzeiten, Texte, Dateien) und einem Protokoll als `.txt`.
    - Der Ticket-Kanal wird gelöscht.
+6. **✏️ Entscheidung bearbeiten** (Button oben im Archiv, nur Stewards): Entscheidung oder Strafe falsch eingetragen, oder Clips versehentlich gelöscht? Im Formular Entscheidung, Strafe und Video-Links ändern und bei Bedarf Dateien nachreichen. Die **bestehende** Nachricht im Ergebnis-Kanal wird nur aktualisiert, nicht neu gepostet und ohne neuen Ping. Sie zeigt dann „Zuletzt geändert von …“. Der alte Stand steht im Archiv-Thread. Das geht nur bei Vorfällen, die ab diesem Update entschieden wurden.
 
 **Aufbau im Ticket:** Ganz oben steht eine **Übersicht**, die sich nur selbst aktualisiert und nie neu gepostet wird. Sie enthält:
 - eine kurze Anleitung für den, der gerade dran ist

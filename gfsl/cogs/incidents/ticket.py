@@ -5,8 +5,10 @@
    Absenden ist endgültig -> Einsender wird entfernt, Beschuldigte werden hinzugeholt
 3. Jeder Beschuldigte (und von Stewards hinzugefügte Personen) füllt das Aussage-Formular aus.
    Absenden ist endgültig -> wird danach entfernt. Kommt nichts: „Ohne Gegenclip bewerten“.
+   „Alle Beteiligten entfernen“ nimmt jederzeit alle Nicht-Stewards aus dem Kanal (Ausstehende = ohne Aussage).
 4. Stewards beraten und tragen mit „Entscheidung eintragen“ die Entscheidung ein
    -> Ergebnis mit Links/Dateien im Ergebnis-Kanal, Verlauf als Thread im Archiv, Ticket-Kanal wird gelöscht
+5. Falsch eingetragen oder Clips fehlen? Im Archiv „Entscheidung bearbeiten“ – die Ergebnis-Nachricht wird nur aktualisiert
 
 Befangenheit: Wer Einsender, Beschuldigter oder hinzugefügt ist, bekommt nach seinem Teil eine Sperre für den Kanal –
 auch wenn er selbst Ligaleitung/Steward ist (Mitglieds-Sperre schlägt Rollen-Freigabe).
@@ -136,10 +138,11 @@ ACTIONS = {
     "cancel": ("Abbrechen", discord.ButtonStyle.secondary, None),
     "skip": ("Ohne Gegenclip bewerten", discord.ButtonStyle.secondary, "⏭️"),
     "add": ("Person hinzufügen", discord.ButtonStyle.secondary, "➕"),
+    "kick": ("Alle Beteiligten entfernen", discord.ButtonStyle.danger, "🚪"),
     "close": ("Entscheidung eintragen", discord.ButtonStyle.primary, "⚖️"),
 }
-PHASE_ACTIONS = {"reporter": ["form", "cancel"], "statements": ["form", "add", "skip"],
-                 "review": ["add", "close"]}
+PHASE_ACTIONS = {"reporter": ["form", "cancel"], "statements": ["form", "add", "skip", "kick"],
+                 "review": ["add", "kick", "close"]}
 
 
 class TicketButton(discord.ui.DynamicItem[discord.ui.Button], template=r"rv:(?P<action>[a-z]+):(?P<t>\d+)"):
@@ -350,6 +353,43 @@ async def on_add(interaction: discord.Interaction, d: dict, t: dict):
                                             ephemeral=True, view=PickUsersView("Personen auswählen …", "Hinzufügen", confirm))
 
 
+async def on_kick(interaction: discord.Interaction, d: dict, t: dict):
+    """Alle Beteiligten (und von Hand reingeholte Nicht-Stewards) aus dem Kanal nehmen – z. B. zum ungestörten Beraten.
+    Wer noch keine Aussage hat, gilt als „ohne Aussage“. Zurückholen geht mit „Person hinzufügen“."""
+    s = d["settings"]
+    if not is_staff(interaction.user, s):
+        return await interaction.response.send_message("Das können nur Ligaleitung und Stewards.", ephemeral=True)
+
+    async def confirmed(i: discord.Interaction):
+        await i.response.edit_message(content="🚪 Entferne alle Beteiligten …", view=None)
+        async with lock(i.guild_id, t["id"]):
+            channel = i.channel
+            party_ids = set(parties(t))
+            targets = {u for u in party_ids if (m := channel.guild.get_member(int(u))) and channel.permissions_for(m).view_channel}
+            for target, ow in channel.overwrites.items():
+                if isinstance(target, discord.Member) and target != channel.guild.me and ow.view_channel \
+                        and (str(target.id) in party_ids or not is_staff(target, s)):
+                    targets.add(str(target.id))
+            for uid in targets:
+                await set_access(channel, t, uid, REMOVED, f"Alle Beteiligten entfernt von {i.user}")
+            skipped = pending(t)
+            t["skipped"] += skipped
+            add_log(t, f"Alle Beteiligten entfernt von <@{i.user.id}>" + (f" ({len(targets)})" if targets else " – war niemand mehr drin"))
+            if t["phase"] == "statements" and skipped:
+                await to_review(channel, d, t, "Ausstehende ohne Aussage – weiter zur Bewertung")
+            await update_control(channel, t)
+        await i.edit_original_response(content=f"🚪 {len(targets)} Person(en) aus dem Ticket entfernt."
+                                       + (f" {len(skipped)} ohne Aussage." if skipped else ""))
+
+    view = discord.ui.View(timeout=120)
+    button = discord.ui.Button(label="Ja, alle entfernen", style=discord.ButtonStyle.danger)
+    button.callback = confirmed
+    view.add_item(button)
+    await interaction.response.send_message(
+        "Alle Beteiligten (Einsender, Beschuldigte, Hinzugefügte und von Hand reingeholte Nicht-Stewards) verlieren den Zugriff "
+        "auf dieses Ticket. Wer noch keine Aussage hat, wird als „ohne Aussage“ gewertet. Sicher?", ephemeral=True, view=view)
+
+
 # ---------- 4. Abschließen ----------
 
 class CloseModal(discord.ui.Modal, title="Entscheidung eintragen"):
@@ -373,4 +413,4 @@ async def on_close(interaction: discord.Interaction, d: dict, t: dict):
     await interaction.response.send_modal(CloseModal(t["id"]))
 
 
-HANDLERS = {"form": on_form, "cancel": on_cancel, "skip": on_skip, "add": on_add, "close": on_close}
+HANDLERS = {"form": on_form, "cancel": on_cancel, "skip": on_skip, "add": on_add, "kick": on_kick, "close": on_close}

@@ -2,11 +2,12 @@
 from discord.ext import commands
 
 from .commands import IncidentsCog
+from .edit import EditButton
 from .ticket import PanelView, TicketButton
 
 
 async def setup(bot: commands.Bot):
     # Buttons, die auch nach einem Neustart funktionieren müssen
     bot.add_view(PanelView())
-    bot.add_dynamic_items(TicketButton)
+    bot.add_dynamic_items(TicketButton, EditButton)
     await bot.add_cog(IncidentsCog(bot))
