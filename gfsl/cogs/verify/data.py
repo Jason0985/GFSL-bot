@@ -19,7 +19,8 @@ DEFAULTS = {
         "list_channel_id": None,    # hier steht die Fahrerliste
         "list_message_ids": [],
         "verified_role_id": None,   # Rolle bei Freigabe
-        "remove_role_id": None,     # Rolle, die bei Freigabe entfernt wird (z. B. "Unverifiziert")
+        "remove_role_id": None,     # alt: eine Rolle – wird beim Laden nach remove_role_ids übernommen
+        "remove_role_ids": [],      # Rollen, die bei Freigabe entfernt werden (z. B. "Unverifiziert", "Keine Zeit eingeschickt")
         "mod_role_id": None,        # Admin-Rolle: darf alles mit dem Bot (zusätzlich zu "Server verwalten"); Name bleibt für alte Daten
         "nickname_template": "{name}",
         "number_min": 1,
@@ -34,4 +35,10 @@ DEFAULTS = {
 
 
 def get(guild_id: int) -> dict:
-    return storage.section(guild_id, "verify", DEFAULTS)
+    d = storage.section(guild_id, "verify", DEFAULTS)
+    s = d["settings"]
+    if s.get("remove_role_id"):  # alte Einstellung (nur eine Rolle) übernehmen
+        if s["remove_role_id"] not in s["remove_role_ids"]:
+            s["remove_role_ids"].append(s["remove_role_id"])
+        s["remove_role_id"] = None
+    return d

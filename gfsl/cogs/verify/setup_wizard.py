@@ -46,6 +46,10 @@ def role_status(guild: discord.Guild, role_id: int | None, assigned: bool = True
     return role.mention
 
 
+def roles_status(guild: discord.Guild, role_ids: list[int]) -> str:
+    return "\n".join(role_status(guild, rid) for rid in role_ids if guild.get_role(rid)) or "—"
+
+
 def settings_overview(guild: discord.Guild, d: dict) -> str:
     s = d["settings"]
     example = drivers.render_nickname(s["nickname_template"], {"name": "Wenig-Luca", "number": 17, "flag": "Deutschland", "platform": "PlayStation"})
@@ -54,7 +58,7 @@ def settings_overview(guild: discord.Guild, d: dict) -> str:
         f"**Mod-Kanal:** {channel_status(guild, s['mod_channel_id'], PERMS_MOD)}",
         f"**Fahrerliste:** {channel_status(guild, s['list_channel_id'], PERMS_LIST)}",
         f"**Rolle bei Freigabe:** {role_status(guild, s['verified_role_id'])}",
-        f"**Rolle entfernen:** {role_status(guild, s['remove_role_id'])}",
+        f"**Rollen entfernen:** {roles_status(guild, s['remove_role_ids'])}",
         f"**Admin-Rolle (darf alles mit dem Bot):** {role_status(guild, s['mod_role_id'], assigned=False)} (+ alle mit „Server verwalten“)",
         f"**Nickname-Vorlage:** `{s['nickname_template']}` → z. B. „{example}“",
         f"**Nummern:** {s['number_min']}–{s['number_max']}",
@@ -151,13 +155,17 @@ class SetupWizard(discord.ui.View):
             self.add_button(f"Diesen Kanal nehmen: #{self.channel.name}"[:80], discord.ButtonStyle.secondary,
                             take_here, emoji="📍", row=row + 1)
 
-    def add_role_select(self, key: str, placeholder: str, row: int):
+    def add_role_select(self, key: str, placeholder: str, row: int, multi: bool = False):
         current = self.s[key]
-        select = discord.ui.RoleSelect(placeholder=placeholder, row=row, min_values=0, max_values=1,
-                                       default_values=[discord.Object(current)] if current else [])
+        ids = (current or []) if multi else ([current] if current else [])
+        select = discord.ui.RoleSelect(placeholder=placeholder, row=row, min_values=0, max_values=25 if multi else 1,
+                                       default_values=[discord.Object(r) for r in ids[:25]])
 
         async def callback(interaction: discord.Interaction):
-            self.s[key] = select.values[0].id if select.values else None
+            if multi:
+                self.s[key] = [r.id for r in select.values]
+            else:
+                self.s[key] = select.values[0].id if select.values else None
             self.save()
             await self.refresh(interaction, "✅ Gespeichert.")
         select.callback = callback
@@ -240,7 +248,8 @@ class SetupWizard(discord.ui.View):
         embed.description = (
             "**Beim Akzeptieren** einer Verifizierung (beide optional):\n"
             f"• **Rolle bei Freigabe:** {role_status(self.guild, s['verified_role_id'])}\n"
-            f"• **Rolle entfernen** (z. B. Unverifiziert): {role_status(self.guild, s['remove_role_id'])}\n\n"
+            f"• **Rollen entfernen** (mehrere möglich, z. B. Unverifiziert, Keine Zeit eingeschickt): {roles_status(self.guild, s['remove_role_ids'])}\n"
+            "-# Schon Verifizierten nimmst du diese Rollen mit `/verify fahrer rollen_bereinigen` weg.\n\n"
             "**Admin-Rolle zum Bearbeiten mit dem Bot:**\n"
             f"• {role_status(self.guild, s['mod_role_id'], assigned=False)}\n"
             "Wer diese Rolle hat, darf **alles** mit dem Bot: alle Befehle, Anträge akzeptieren/ablehnen, Fahrer bearbeiten. "
@@ -249,7 +258,7 @@ class SetupWizard(discord.ui.View):
             "Zum Leeren die Auswahl im Menü entfernen. Rollen je Antwort (z. B. PlayStation → @PS-Fahrer) stellst du mit `/verify fragen rollen` ein."
         )
         self.add_role_select("verified_role_id", "Rolle bei Freigabe …", 0)
-        self.add_role_select("remove_role_id", "Rolle, die entfernt wird …", 1)
+        self.add_role_select("remove_role_ids", "Rollen, die entfernt werden (mehrere möglich) …", 1, multi=True)
         self.add_role_select("mod_role_id", "Admin-Rolle (darf alles mit dem Bot bearbeiten) …", 2)
 
     def step_numbers(self, embed: discord.Embed):

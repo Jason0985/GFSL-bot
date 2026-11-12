@@ -92,6 +92,27 @@ async def flag_autocomplete(interaction: discord.Interaction, current: str) -> l
             for name, emoji in FLAGS.items() if current.lower() in name.lower()][:25]
 
 
+async def strip_remove_roles(guild: discord.Guild, d: dict) -> tuple[int, list[str]]:
+    """Nimmt allen Verifizierten (eingetragene Fahrer + Rolle bei Freigabe) die „Rollen entfernen“ weg."""
+    s = d["settings"]
+    roles = [r for rid in s["remove_role_ids"] if (r := guild.get_role(rid))]
+    verified_role = guild.get_role(s["verified_role_id"] or 0)
+    members = {m for uid in d["drivers"] if (m := guild.get_member(int(uid)))}
+    if verified_role:
+        members |= set(verified_role.members)
+    removed, errors = 0, []
+    for member in members:
+        has = [r for r in roles if member.get_role(r.id)]
+        if not has:
+            continue
+        try:
+            await member.remove_roles(*has, reason="GFSL Verify: verifiziert")
+            removed += len(has)
+        except discord.HTTPException as e:
+            errors.append(f"{member.display_name}: {e.text or e}")
+    return removed, errors
+
+
 class VerifyCog(commands.Cog):
     # Alles unter /verify (Admins), Untergruppen /verify fragen … und /verify fahrer …
     verify = app_commands.Group(name="verify", description="Verifizierung: Einrichtung, Fragen, Fahrer & Nummern",
@@ -132,6 +153,21 @@ class VerifyCog(commands.Cog):
             log.info("Standard Deutschland/PlayStation auf %s bei %d Fahrern eingetragen", guild.name, changed)
             if changed:
                 self.schedule_refresh(guild, delay=2)
+
+        # Einmalig: „Keine Zeit eingeschickt“ wurde früher beim Akzeptieren nicht entfernt -> als Entfernen-Rolle
+        # eintragen und allen schon Verifizierten wegnehmen
+        for guild in self.bot.guilds:
+            d = data.get(guild.id)
+            if d.get("keine_zeit_cleanup_done"):
+                continue
+            s = d["settings"]
+            for role in guild.roles:
+                if "keine zeit" in role.name.lower() and role.id not in s["remove_role_ids"]:
+                    s["remove_role_ids"].append(role.id)
+            removed, errors = await strip_remove_roles(guild, d)
+            d["keine_zeit_cleanup_done"] = True
+            storage.save()
+            log.info("Entfernen-Rollen auf %s bereinigt: %d entfernt, %d Fehler", guild.name, removed, len(errors))
 
     # ---------- Fahrerliste bei Rollenwechsel aktualisieren ----------
 
@@ -434,6 +470,18 @@ class VerifyCog(commands.Cog):
         report = await option_roles.sync_all(interaction.guild, d, questions, andere_entfernen)
         err = await self.refresh_list(interaction.guild, d)
         await interaction.followup.send(report.text()[:1900] + (f"\n⚠️ {err}" if err else ""), ephemeral=True)
+
+    @fahrer.command(name="rollen_bereinigen", description="Nimmt allen Verifizierten die Rollen weg, die beim Akzeptieren entfernt werden")
+    async def rollen_bereinigen(self, interaction: discord.Interaction):
+        d = data.get(interaction.guild_id)
+        if not d["settings"]["remove_role_ids"]:
+            return await reply(interaction, "Keine Rollen zum Entfernen eingestellt (`/verify setup` → Rollen).")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        removed, errors = await strip_remove_roles(interaction.guild, d)
+        text = f"🧹 {removed} Rolle(n) bei Verifizierten entfernt."
+        if errors:
+            text += "\n⚠️ " + "\n⚠️ ".join(errors[:10])
+        await interaction.followup.send(text[:1900], ephemeral=True)
 
     @fahrer.command(name="fehlende_angaben", description="Zeigt, bei welchen Fahrern Flagge oder Plattform fehlt")
     @app_commands.describe(oeffentlich="In den Kanal posten und die Fahrer anpingen, damit sie es mit /verify-profil nachtragen")

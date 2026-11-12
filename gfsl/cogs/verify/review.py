@@ -174,7 +174,7 @@ async def accept(interaction: discord.Interaction, d: dict, app: dict):
     else:
         if w := await drivers.set_nickname(member, s["nickname_template"], driver):
             warnings.append(w)
-        for role_id, add in ((s["verified_role_id"], True), (s["remove_role_id"], False)):
+        for role_id, add in ((s["verified_role_id"], True), *((r, False) for r in s["remove_role_ids"])):
             role = interaction.guild.get_role(role_id or 0)
             if role is None:
                 continue

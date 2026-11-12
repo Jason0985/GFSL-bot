@@ -145,6 +145,7 @@ Alle Befehle außer `/verify-profil` sind nur für Admins (siehe „Berechtigung
 | `/verify fahrer setzen` | Fahrer manuell eintragen oder Nummer ändern. Beim Tippen werden freie Nummern und Flaggen vorgeschlagen. |
 | `/verify fahrer entfernen` | Fahrer austragen, die Nummer wird wieder frei. |
 | `/verify fahrer rollen_sync` | Gibt allen eingetragenen Fahrern die Rollen passend zu ihrer Auswahl, auch nachträglich. |
+| `/verify fahrer rollen_bereinigen` | Nimmt allen Verifizierten die Rollen weg, die beim Akzeptieren entfernt werden (`/verify setup` → Rollen, mehrere möglich, z. B. Unverifiziert, Keine Zeit eingeschickt). |
 | `/verify fahrer fehlende_angaben` | Zeigt, wem Flagge oder Plattform fehlt. Mit `oeffentlich:True` werden die Fahrer im Kanal angepingt, damit sie `/verify-profil` nutzen. |
 | `/verify-profil` | Für Fahrer: Flagge und Plattform eintragen oder ändern. |
 | `/verify fahrer nummern` | Übersicht aller Nummern (frei, vergeben), optional öffentlich. |
