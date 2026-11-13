@@ -61,6 +61,18 @@ def clip(lines: list[str], limit: int = 1024) -> str:
     return cut + f"\n… (+{text.count(chr(10)) - cut.count(chr(10))})"
 
 
+def clip_join(items: list[str], limit: int = 1024, sep: str = ", ") -> str:
+    """Liste mit Komma, aber nur ganze Einträge – sonst zerschneidet Discord Links/Markdown mitten im Namen."""
+    out = ""
+    for n, item in enumerate(items):
+        rest = f"{sep}… (+{len(items) - n})"
+        if len(out) + len(sep) + len(item) + len(rest) > limit and n < len(items) - 1 \
+                or len(out) + len(sep) + len(item) > limit:
+            return out + (rest if out else rest.lstrip(sep))
+        out += (sep if out else "") + item
+    return out or NONE
+
+
 def spacer(embed: discord.Embed, name: str = SPACER):
     embed.add_field(name=name, value=SPACER, inline=False)
 
@@ -131,7 +143,7 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
     for status, label in (("maybe", "❔ Vielleicht"), ("no", "❌ Abgemeldet")):
         people = [f"{number(s, hover)} **{name_of(guild, uid, s)}**" for uid, s in signups if s["status"] == status]
         if people:
-            embed.add_field(name=f"{label} ({len(people)})", value=clip([", ".join(people)]), inline=False)
+            embed.add_field(name=f"{label} ({len(people)})", value=clip_join(people), inline=False)
 
     if url := D.image_url(D.field(d, ev, "image")):
         spacer(embed)

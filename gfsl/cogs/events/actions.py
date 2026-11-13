@@ -247,23 +247,33 @@ async def post_assignment(guild: discord.Guild, d: dict, ev: dict, changes: list
     teams = {c["id"]: c for c in assign.classes(d)}
     pings = discord.AllowedMentions(users=True, roles=False, everyone=False)
     msg_id = ev.get("assignment_message_id")
+    assigned = " ".join(f"<@{u}>" for u in ev["assignments"])
     if msg_id:
-        try:
-            await channel.get_partial_message(msg_id).edit(embed=embed)
+        try:  # Erwähnungen oben aktuell halten (Bearbeiten pingt niemanden neu)
+            await channel.get_partial_message(msg_id).edit(content=assigned or None, embed=embed, allowed_mentions=pings)
         except discord.NotFound:
             msg_id = None
     if not msg_id:
-        assigned = " ".join(f"<@{u}>" for u in ev["assignments"])
         msg = await channel.send(content=assigned or None, embed=embed, allowed_mentions=pings, reference=reply_to(ev))
         ev["assignment_message_id"] = msg.id
         storage.save()
         return
     lines = []
+    taken = {new for _, _, new in changes if new is not None}  # Plätze, die gerade jemand anderes bekommen hat
+    status_text = {"no": ("❌", "hat sich abgemeldet"), "maybe": ("❔", "hat auf „Vielleicht“ gewechselt")}
     for uid, old, new in changes:
         if new is not None:
             lines.append(f"🔁 <@{uid}> fährt jetzt für {teams[new]['emoji']} **{teams[new]['name']}**")
+            continue
+        status = ev["signups"].get(uid, {}).get("status")
+        if status != "yes":  # selbst abgemeldet – nicht „alle Plätze belegt“
+            free = (f" – Platz bei {teams[old]['emoji']} **{teams[old]['name']}** ist wieder frei"
+                    if old in teams and old not in taken else "")
+            icon, verb = status_text.get(status, ("❌", "ist nicht mehr angemeldet"))
+            lines.append(f"{icon} <@{uid}> {verb}{free}")
         else:
-            lines.append(f"🚫 <@{uid}> hat keine Einteilung mehr – alle Plätze belegt")
+            lines.append(f"🚫 <@{uid}> hat keine Einteilung mehr – gerade kein freier Platz, "
+                         "rückt automatisch nach, sobald einer frei wird")
     if lines:
         await channel.send("**Einteilung geändert:**\n" + "\n".join(lines), allowed_mentions=pings)
 
