@@ -462,6 +462,32 @@ class EventsCog(commands.Cog):
             await actions.update_message(interaction.guild, d, ev)
         await interaction.followup.send(text, ephemeral=True)
 
+    @event.command(name="q_sperre", description="Q-Sperre (zu spät angemeldet) aufheben oder setzen, z. B. nach einer Test-Abmeldung")
+    @app_commands.autocomplete(eintrag=event_autocomplete)
+    @app_commands.describe(fahrer="Wer", aufheben="Ja = Q-Sperre weg, gilt als rechtzeitig angemeldet (Standard). Nein = Q-Sperre setzen")
+    async def q_sperre(self, interaction: discord.Interaction, eintrag: str, fahrer: discord.Member, aufheben: bool = True):
+        d = D.get(interaction.guild_id)
+        ev = self.find_event(d, eintrag)
+        if ev is None or ev["status"] not in ("posted", "closed"):
+            return await reply(interaction, "Das geht nur bei geposteten oder vergangenen Rennen.")
+        s = ev["signups"].get(str(fahrer.id))
+        if s is None or s["status"] != "yes":
+            return await reply(interaction, f"{fahrer.mention} ist bei **{D.field(d, ev, 'title')}** nicht angemeldet. "
+                                            "Erst mit `/anmeldung event teilnehmer` anmelden.")
+        if s.get("late", False) == (not aufheben):
+            return await reply(interaction, f"{fahrer.mention} hat schon {'keine' if aufheben else 'eine'} Q-Sperre.")
+        s["late"] = not aufheben
+        storage.save()
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Ohne Q-Sperre zählt ein Stammfahrer wieder als fester Platz – die Einteilung zieht nach
+        if ev["status"] == "posted":
+            await actions.refresh(interaction.guild, d, ev)
+        else:
+            await actions.update_message(interaction.guild, d, ev)
+        text = (f"✅ Q-Sperre von {fahrer.mention} bei **{D.field(d, ev, 'title')}** aufgehoben – gilt als rechtzeitig angemeldet."
+                if aufheben else f"⏰ {fahrer.mention} hat bei **{D.field(d, ev, 'title')}** jetzt eine Q-Sperre.")
+        await interaction.followup.send(text, ephemeral=True)
+
     @event.command(name="neu_einteilen", description="Ersatzfahrer komplett neu auslosen")
     @app_commands.autocomplete(eintrag=event_autocomplete)
     async def neu_einteilen(self, interaction: discord.Interaction, eintrag: str):
