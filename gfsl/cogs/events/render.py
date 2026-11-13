@@ -61,16 +61,15 @@ def clip(lines: list[str], limit: int = 1024) -> str:
     return cut + f"\n… (+{text.count(chr(10)) - cut.count(chr(10))})"
 
 
-def clip_join(items: list[str], limit: int = 1024, sep: str = ", ") -> str:
-    """Liste mit Komma, aber nur ganze Einträge – sonst zerschneidet Discord Links/Markdown mitten im Namen."""
-    out = ""
-    for n, item in enumerate(items):
-        rest = f"{sep}… (+{len(items) - n})"
-        if len(out) + len(sep) + len(item) + len(rest) > limit and n < len(items) - 1 \
-                or len(out) + len(sep) + len(item) > limit:
-            return out + (rest if out else rest.lstrip(sep))
-        out += (sep if out else "") + item
-    return out or NONE
+def chunk_join(items: list[str], limit: int = 1022, sep: str = ", ") -> list[str]:
+    """Liste mit Komma auf mehrere Felder verteilen – nur zwischen ganzen Einträgen, niemand fällt weg."""
+    chunks, cur = [], ""
+    for item in items:
+        if cur and len(cur) + len(sep) + len(item) > limit:
+            chunks.append(cur)
+            cur = ""
+        cur += (sep if cur else "") + item[:limit]
+    return chunks + [cur] if cur else chunks or [NONE]
 
 
 def spacer(embed: discord.Embed, name: str = SPACER):
@@ -133,17 +132,26 @@ def event_embed(guild: discord.Guild | None, d: dict, ev: dict, hover: bool = Tr
             marker = f" → {target['emoji']} {target['name']}" if target else (" 🚫" if ev.get("deadline_done") else "")
             lines.append(entry(guild, uid, s, res["emoji"], hover) + marker)
         spacer(embed)  # Abstand zwischen Stammfahrern und Ersatzfahrern
-        embed.add_field(name=f"{res['emoji']} {res['name']} ({len(lines)})"[:256], value=clip(lines), inline=False)
+        embed.add_field(name=f"{res['emoji']} {res['name']} ({len(lines)})"[:256], value=clip(lines, 1022) + "\n" + SPACER, inline=False)
 
     for st in streamers:
         lines = [entry(guild, uid, s, st["emoji"], hover) for uid, s in yes if s["class_id"] == st["id"]]
         spacer(embed)
-        embed.add_field(name=f"{st['emoji']} {st['name']} ({len(lines)})"[:256], value=clip(lines), inline=False)
+        embed.add_field(name=f"{st['emoji']} {st['name']} ({len(lines)})"[:256], value=clip(lines, 1022) + "\n" + SPACER, inline=False)
 
     for status, label in (("maybe", "❔ Vielleicht"), ("no", "❌ Abgemeldet")):
-        people = [f"{number(s, hover)} **{name_of(guild, uid, s)}**" for uid, s in signups if s["status"] == status]
-        if people:
-            embed.add_field(name=f"{label} ({len(people)})", value=clip_join(people), inline=False)
+        mine = [(uid, s) for uid, s in signups if s["status"] == status]
+        if not mine:
+            continue
+        # Alle Namen zeigen: passt es mit Uhrzeit-Tooltip nicht in ein Feld, ohne Tooltip; notfalls auf mehrere Felder
+        people = [f"{number(s, hover)} **{name_of(guild, uid, s)}**" for uid, s in mine]
+        if len(", ".join(people)) > 1022:
+            people = [f"{number(s, False)} **{name_of(guild, uid, s)}**" for uid, s in mine]
+        chunks = chunk_join(people)
+        for n, chunk in enumerate(chunks):
+            last = n == len(chunks) - 1
+            embed.add_field(name=f"{label} ({len(mine)})" if n == 0 else SPACER,
+                            value=chunk + ("\n" + SPACER if last else ""), inline=False)
 
     if url := D.image_url(D.field(d, ev, "image")):
         spacer(embed)
