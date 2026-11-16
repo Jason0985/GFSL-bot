@@ -247,7 +247,7 @@ Rollen und Nicknames werden beim Import **nicht** verändert. Die Plattform-Roll
 | Befehl | Was er macht |
 |---|---|
 | `/anmeldung kalender bearbeiten` | Titel, Beschreibung, Datum und Bild ändern. Speichern zählt als Freigabe. |
-| `/anmeldung kalender verschieben eintrag: tage:7` | Verschiebt das Rennen. **Alle späteren Rennen der Vorlage rutschen mit** (`nachfolgende:False` = nur dieses). |
+| `/anmeldung kalender verschieben eintrag: tage:7` | Verschiebt das Rennen. **Alle späteren Rennen der Vorlage rutschen mit** (`nachfolgende:False` = nur dieses). Geht auch bei einem **ausgefallenen Rennen**, das schon abgeschlossen ist: Es wird zum neuen Termin wieder geöffnet, die Anmeldungen bleiben und es zählt erst wieder in der Anwesenheit, wenn es wirklich stattgefunden hat. |
 | `/anmeldung kalender aussetzen` | Rennen wird nicht gepostet, die anderen bleiben, wo sie sind. |
 | `/anmeldung kalender freigeben` / `posten` | So freigeben bzw. sofort posten. |
 | `/anmeldung kalender entfernen` | Rennen löschen (eine gepostete Anmeldung wird mitgelöscht). |

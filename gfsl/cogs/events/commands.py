@@ -364,7 +364,7 @@ class EventsCog(commands.Cog):
             return await reply(interaction, "Nur geplante oder offene Rennen können bearbeitet werden.")
         await interaction.response.send_modal(review.EventEditModal(interaction.guild, eintrag))
 
-    @kalender.command(name="verschieben", description="Rennen verschieben – auf Wunsch rutschen alle späteren mit")
+    @kalender.command(name="verschieben", description="Rennen verschieben – auch ein ausgefallenes; auf Wunsch rutschen alle späteren mit")
     @app_commands.describe(tage="Um wie viele Tage (Standard 7 = eine Woche, negativ = früher)",
                            nachfolgende="Alle späteren Rennen derselben Vorlage mitverschieben (Standard: ja)")
     @app_commands.autocomplete(eintrag=event_autocomplete)
@@ -372,19 +372,35 @@ class EventsCog(commands.Cog):
                                    tage: app_commands.Range[int, -365, 365] = 7, nachfolgende: bool = True):
         d = D.get(interaction.guild_id)
         ev = self.find_event(d, eintrag)
-        if ev is None or ev["status"] not in ("planned", "posted"):
-            return await reply(interaction, "Nur geplante oder offene Rennen können verschoben werden.")
+        if ev is None or ev["status"] == "skipped":
+            return await reply(interaction, "Dieses Rennen gibt es nicht oder es ist ausgesetzt.")
+        new_start = tu.shift(ev["starts_at"], tage)
+        if tu.from_str(new_start) <= tu.now():
+            return await reply(interaction, f"❌ Der neue Termin ({tu.pretty(new_start)}) liegt in der Vergangenheit.")
         moved = [ev]
         if nachfolgende:
             moved += [e for e in D.sorted_events(d, ev["template_id"])
-                      if e is not ev and e["starts_at"] > ev["starts_at"] and e["status"] == "planned"]
+                      if e is not ev and e["starts_at"] > ev["starts_at"] and e["status"] in ("planned", "posted")]
+        reopened = []
         for e in moved:
             e["starts_at"] = tu.shift(e["starts_at"], tage)
+            # Ausgefallenes Rennen (schon abgeschlossen bzw. nie gepostet) wieder öffnen: Es zählt erst wieder in
+            # der Anwesenheit, wenn es zum neuen Termin wirklich stattgefunden hat. Anmeldungen bleiben erhalten.
+            if e["status"] == "closed":
+                e["status"] = "posted"
+                reopened.append(e)
+            elif e["status"] == "missed":
+                e["status"] = "planned"
+                e["review_sent"] = e["overdue_sent"] = False
+                e.pop("review_sent_to", None), e.pop("overdue_sent_to", None)
+                reopened.append(e)
         storage.save()
         await interaction.response.defer(ephemeral=True, thinking=True)
-        if ev["status"] == "posted":
-            await actions.rescheduled(interaction.guild, d, ev)
-        lines = [f"• {D.field(d, e, 'title')} → {tu.pretty(e['starts_at'])}" for e in moved]
+        for e in moved:
+            if e["status"] == "posted":  # Frist, Q-Sperren, Einteilung und Nachricht (wieder mit Buttons) anpassen
+                await actions.rescheduled(interaction.guild, d, e)
+        lines = [f"• {D.field(d, e, 'title')} → {tu.pretty(e['starts_at'])}" + (" (wieder geöffnet)" if e in reopened else "")
+                 for e in moved]
         await interaction.followup.send((f"✅ {len(moved)} Rennen verschoben:\n" + "\n".join(lines))[:2000], ephemeral=True)
 
     @kalender.command(name="aussetzen", description="Rennen aussetzen: wird nicht gepostet (die anderen bleiben, wo sie sind)")
