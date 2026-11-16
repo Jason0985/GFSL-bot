@@ -108,10 +108,16 @@ class EventsCog(commands.Cog):
                 return
             needs_ok = template["review"] and not ev["confirmed"]
             if needs_ok:
-                if not ev["review_sent"] and now >= t["post"] - timedelta(hours=template["review_hours"]):
-                    await review.send_review(self.bot, guild, d, ev)
-                if now >= t["post"] and not ev["overdue_sent"]:
-                    await review.send_overdue(self.bot, guild, d, ev)
+                # Pro Schritt genau eine DM an den, der gerade eingetragen ist. Wird der Zuständige in der Vorlage
+                # geändert, bekommt der Neue die DM nachgeschickt. Ist der Post-Zeitpunkt schon da (z. B. kurzes
+                # Freigabe-Fenster oder Neustart), gibt es nur die „Noch nicht gepostet“-DM statt beider.
+                target = review.reminder_user_id(d, ev)
+                if now >= t["post"]:
+                    if ev.get("overdue_sent_to", "-") != target:
+                        await review.send_overdue(self.bot, guild, d, ev)
+                elif now >= t["post"] - timedelta(hours=template["review_hours"]):
+                    if ev.get("review_sent_to", "-") != target:
+                        await review.send_review(self.bot, guild, d, ev)
                 return
             if now >= t["post"]:
                 log.info("Event #%s: %s", ev["id"], await actions.post(guild, d, ev))

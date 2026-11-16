@@ -18,8 +18,9 @@ def reminder_user_id(d: dict, ev: dict) -> int | None:
     return int(uid) if uid else None
 
 
-async def send_dm(client: discord.Client, d: dict, ev: dict, guild: discord.Guild, text: str, with_buttons: bool) -> bool:
-    uid = reminder_user_id(d, ev)
+async def send_dm(client: discord.Client, d: dict, ev: dict, guild: discord.Guild, text: str, with_buttons: bool,
+                  uid: int | None = None) -> bool:
+    uid = uid or reminder_user_id(d, ev)
     if not uid:
         log.warning("Event #%s: niemand für die Freigabe eingetragen", ev["id"])
         return False
@@ -42,16 +43,21 @@ async def send_review(client: discord.Client, guild: discord.Guild, d: dict, ev:
     text = (f"📝 **Freigabe nötig – {guild.name}**\nDie Anmeldung unten soll <t:{tu.ts(post_at)}:R> "
             f"(<t:{tu.ts(post_at)}:f>) gepostet werden. Bitte Titel, Beschreibung, Datum und Bild prüfen.\n"
             "**Ohne Freigabe wird sie nicht gepostet.**")
-    ev["review_sent"] = True  # auch bei geschlossenen DMs nicht jede Minute neu versuchen (steht im Log)
+    # Merken, an wen – auch bei geschlossenen DMs nicht jede Minute neu versuchen (steht im Log)
+    uid = reminder_user_id(d, ev)
+    ev["review_sent"], ev["review_sent_to"] = True, uid
     storage.save()
-    await send_dm(client, d, ev, guild, text, with_buttons=True)
+    await send_dm(client, d, ev, guild, text, with_buttons=True, uid=uid)
 
 
 async def send_overdue(client: discord.Client, guild: discord.Guild, d: dict, ev: dict):
-    ev["overdue_sent"] = True
+    uid = reminder_user_id(d, ev)
+    # zählt auch als Freigabe-DM: der Empfänger soll nicht noch zusätzlich die normale Freigabe-DM bekommen
+    ev["overdue_sent"], ev["overdue_sent_to"] = True, uid
+    ev["review_sent"], ev["review_sent_to"] = True, uid
     storage.save()
-    await send_dm(client, d, ev, guild, "⚠️ **Noch nicht gepostet:** Die Anmeldung wartet auf deine Freigabe. "
-                                       "Sobald du sie freigibst, wird sie sofort gepostet.", with_buttons=True)
+    await send_dm(client, d, ev, guild, f"⚠️ **Noch nicht gepostet – {guild.name}:** Die Anmeldung wartet auf deine Freigabe. "
+                                       "Sobald du sie freigibst, wird sie sofort gepostet.", with_buttons=True, uid=uid)
 
 
 # ---------- Buttons in der DM ----------
