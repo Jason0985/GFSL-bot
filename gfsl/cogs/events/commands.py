@@ -105,6 +105,11 @@ class EventsCog(commands.Cog):
             if now >= t["start"]:
                 ev["status"] = "missed"
                 storage.save()
+                if template["review"] and not ev["confirmed"]:  # Zuständigen nicht im Unklaren lassen
+                    await review.send_dm(self.bot, d, ev, guild,
+                                         f"⚠️ **Nicht gepostet – {guild.name}:** Das Rennen hat begonnen, ohne dass die "
+                                         "Anmeldung freigegeben wurde. Mit `/anmeldung kalender verschieben` kannst du es "
+                                         "auf einen neuen Termin legen.", with_buttons=False)
                 return
             needs_ok = template["review"] and not ev["confirmed"]
             if needs_ok:
@@ -381,27 +386,51 @@ class EventsCog(commands.Cog):
         if nachfolgende:
             moved += [e for e in D.sorted_events(d, ev["template_id"])
                       if e is not ev and e["starts_at"] > ev["starts_at"] and e["status"] in ("planned", "posted")]
+        await interaction.response.defer(ephemeral=True, thinking=True)
         reopened = []
         for e in moved:
             e["starts_at"] = tu.shift(e["starts_at"], tage)
-            # Ausgefallenes Rennen (schon abgeschlossen bzw. nie gepostet) wieder öffnen: Es zählt erst wieder in
-            # der Anwesenheit, wenn es zum neuen Termin wirklich stattgefunden hat. Anmeldungen bleiben erhalten.
-            if e["status"] == "closed":
-                e["status"] = "posted"
+            if e["status"] in ("closed", "missed"):
+                # Ausgefallenes Rennen: zurück zur Freigabe, wird danach neu gepostet (Anmeldungen bleiben)
+                await actions.back_to_review(interaction.guild, d, e)
                 reopened.append(e)
-            elif e["status"] == "missed":
-                e["status"] = "planned"
-                e["review_sent"] = e["overdue_sent"] = False
-                e.pop("review_sent_to", None), e.pop("overdue_sent_to", None)
-                reopened.append(e)
+            elif e["status"] == "planned" and not e["confirmed"]:
+                actions.reset_review(e)  # Freigabe-DM mit dem neuen Termin neu schicken
         storage.save()
-        await interaction.response.defer(ephemeral=True, thinking=True)
         for e in moved:
-            if e["status"] == "posted":  # Frist, Q-Sperren, Einteilung und Nachricht (wieder mit Buttons) anpassen
+            if e["status"] == "posted":  # Frist, Q-Sperren, Einteilung und Nachricht anpassen
                 await actions.rescheduled(interaction.guild, d, e)
         lines = [f"• {D.field(d, e, 'title')} → {tu.pretty(e['starts_at'])}" + (" (wieder geöffnet)" if e in reopened else "")
                  for e in moved]
-        await interaction.followup.send((f"✅ {len(moved)} Rennen verschoben:\n" + "\n".join(lines))[:2000], ephemeral=True)
+        text = f"✅ {len(moved)} Rennen verschoben:\n" + "\n".join(lines)
+        if reopened:
+            text += "\n\n" + "\n".join(f"**{D.field(d, e, 'title')}:** {self.schedule_text(d, e)}" for e in reopened)
+        await interaction.followup.send(text[:2000], ephemeral=True)
+
+    @kalender.command(name="zur_freigabe", description="Rennen zurück zur Freigabe: Freigabe-DM kommt, danach wird es neu gepostet")
+    @app_commands.autocomplete(eintrag=event_autocomplete)
+    async def kalender_zur_freigabe(self, interaction: discord.Interaction, eintrag: str):
+        d = D.get(interaction.guild_id)
+        ev = self.find_event(d, eintrag)
+        if ev is None or ev["status"] == "skipped":
+            return await reply(interaction, "Dieses Rennen gibt es nicht oder es ist ausgesetzt.")
+        if tu.now() >= render.times(d, ev)["start"]:
+            return await reply(interaction, "❌ Das Rennen liegt in der Vergangenheit. Erst mit `/anmeldung kalender verschieben` "
+                                            "einen neuen Termin setzen.")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        was_posted = ev["status"] != "planned"
+        if was_posted:
+            await actions.back_to_review(interaction.guild, d, ev)
+        else:
+            actions.reset_review(ev)
+            ev["confirmed"] = not D.template_of(d, ev)["review"]
+            storage.save()
+        text = (f"↩️ **{D.field(d, ev, 'title')}** wartet wieder auf die Freigabe"
+                + (" – die alte Anmeldenachricht ist gelöscht, die Anmeldungen bleiben." if was_posted else ".")
+                + f"\n{self.schedule_text(d, ev)}")
+        if not D.template_of(d, ev)["review"]:
+            text += "\nℹ️ Die Vorlage hat keine Freigabe eingestellt – es wird ohne DM zum Post-Zeitpunkt gepostet."
+        await interaction.followup.send(text, ephemeral=True)
 
     @kalender.command(name="aussetzen", description="Rennen aussetzen: wird nicht gepostet (die anderen bleiben, wo sie sind)")
     @app_commands.autocomplete(eintrag=event_autocomplete)

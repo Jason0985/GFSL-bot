@@ -88,6 +88,36 @@ def signup_view(ev_id: str) -> discord.ui.View:
     return view
 
 
+def reset_review(ev: dict):
+    """Freigabe-DMs für dieses Event wieder offen: Der Zuständige bekommt sie (zum neuen Termin) neu."""
+    ev["review_sent"] = ev["overdue_sent"] = False
+    ev.pop("review_sent_to", None)
+    ev.pop("overdue_sent_to", None)
+
+
+async def back_to_review(guild: discord.Guild, d: dict, ev: dict):
+    """Ausgefallenes/abgeschlossenes oder schon gepostetes Rennen wieder auf „geplant“ setzen: Der Zuständige bekommt
+    die Freigabe-DM, danach wird die Anmeldung neu gepostet. Die alte Nachricht wird gelöscht, Anmeldungen bleiben
+    (Q-Sperren passend zur neuen Frist). Zählt erst wieder in der Anwesenheit, wenn es stattgefunden hat."""
+    async with lock(guild.id, ev["id"]):
+        channel = guild.get_channel(ev.get("channel_id") or 0)
+        for key in ("message_id", "assignment_message_id"):
+            if channel and ev.get(key):
+                try:
+                    await channel.get_partial_message(ev[key]).delete()
+                except discord.HTTPException:
+                    pass
+            ev[key] = None
+        deadline = render.times(d, ev)["deadline"].timestamp()
+        for s in ev["signups"].values():
+            if s["status"] == "yes" and not assign.is_streamer(d, s["class_id"]):
+                s["late"] = s["at"] >= deadline
+        ev.update(status="planned", confirmed=not D.template_of(d, ev)["review"], deadline_done=False, remind_done=False,
+                  assignments={})
+        reset_review(ev)
+        storage.save()
+
+
 async def rescheduled(guild: discord.Guild, d: dict, ev: dict):
     """Start eines offenen Events geändert: Q-Sperren und Einteilung passend zur neuen Frist neu berechnen."""
     async with lock(guild.id, ev["id"]):

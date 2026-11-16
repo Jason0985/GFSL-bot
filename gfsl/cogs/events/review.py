@@ -78,10 +78,12 @@ class ReviewButton(discord.ui.DynamicItem[discord.ui.Button], template=r"evr:(?P
 
     async def callback(self, interaction: discord.Interaction):
         guild = interaction.client.get_guild(self.guild_id)
-        if guild is None or not is_admin_member(guild.get_member(interaction.user.id)):
-            return await interaction.response.send_message("⛔ Dafür brauchst du die Admin-Rolle auf dem Server.", ephemeral=True)
         d = D.get(self.guild_id)
         ev = d["events"].get(self.ev_id)
+        # Admins oder wer in der Vorlage für die Freigabe eingetragen ist (auch ohne Admin-Rolle)
+        responsible = ev is not None and reminder_user_id(d, ev) == interaction.user.id
+        if guild is None or not (responsible or is_admin_member(guild.get_member(interaction.user.id))):
+            return await interaction.response.send_message("⛔ Dafür brauchst du die Admin-Rolle auf dem Server.", ephemeral=True)
         if ev is None or ev["status"] != "planned":
             return await interaction.response.send_message(
                 f"Dieses Event ist schon {D.STATUS_LABEL.get(ev['status'], 'erledigt') if ev else 'gelöscht'}.", ephemeral=True)
