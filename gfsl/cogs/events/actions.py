@@ -310,7 +310,20 @@ async def post_assignment(guild: discord.Guild, d: dict, ev: dict, changes: list
 
 # ---------- Ablauf ----------
 
-async def post(guild: discord.Guild, d: dict, ev: dict) -> str:
+async def message_exists(guild: discord.Guild, ev: dict) -> bool:
+    channel = guild.get_channel(ev.get("channel_id") or 0)
+    if channel is None or not ev.get("message_id"):
+        return False
+    try:
+        await channel.fetch_message(ev["message_id"])
+        return True
+    except discord.NotFound:
+        return False
+    except discord.HTTPException:
+        return True  # im Zweifel nicht doppelt posten
+
+
+async def post(guild: discord.Guild, d: dict, ev: dict, announce: bool = True) -> str:
     t = D.template_of(d, ev)
     channel = guild.get_channel(t["channel_id"] or 0)
     if channel is None:
@@ -330,7 +343,7 @@ async def post(guild: discord.Guild, d: dict, ev: dict) -> str:
     ev["message_id"] = msg.id
     storage.save()
     result = f"✅ Gepostet in {channel.mention}: {msg.jump_url}"
-    if t["announce"]:
+    if t["announce"] and announce:
         if err := await send_info(guild, d, ev, "open"):
             result += f"\n⚠️ {err}"
     return result

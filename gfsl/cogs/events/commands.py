@@ -448,6 +448,10 @@ class EventsCog(commands.Cog):
     async def kalender_freigeben(self, interaction: discord.Interaction, eintrag: str):
         d = D.get(interaction.guild_id)
         ev = self.find_event(d, eintrag)
+        if ev is not None and ev["status"] == "posted":
+            return await reply(interaction, "Dieses Rennen ist schon offen (gepostet). Anmeldenachricht gelöscht? → "
+                                            "`/anmeldung kalender posten` postet sie neu. Nochmal durch die Freigabe? → "
+                                            "`/anmeldung kalender zur_freigabe`.")
         if ev is None or ev["status"] != "planned":
             return await reply(interaction, "Nur geplante Rennen können freigegeben werden.")
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -458,9 +462,16 @@ class EventsCog(commands.Cog):
     async def kalender_posten(self, interaction: discord.Interaction, eintrag: str):
         d = D.get(interaction.guild_id)
         ev = self.find_event(d, eintrag)
-        if ev is None or ev["status"] != "planned":
-            return await reply(interaction, "Nur geplante Rennen können gepostet werden.")
+        if ev is None or ev["status"] not in ("planned", "posted"):
+            return await reply(interaction, "Nur geplante oder offene Rennen können gepostet werden. Ein vergangenes Rennen "
+                                            "erst mit `/anmeldung kalender verschieben` auf einen neuen Termin legen.")
         await interaction.response.defer(ephemeral=True, thinking=True)
+        if ev["status"] == "posted":
+            # Offen, aber die Anmeldenachricht wurde gelöscht: neu posten, Anmeldungen bleiben, keine neue Info-Nachricht
+            if await actions.message_exists(interaction.guild, ev):
+                return await interaction.followup.send("Die Anmeldung steht schon im Kanal – nichts zu tun.", ephemeral=True)
+            ev["assignment_message_id"] = None
+            return await interaction.followup.send(await actions.post(interaction.guild, d, ev, announce=False), ephemeral=True)
         await interaction.followup.send(await actions.post(interaction.guild, d, ev), ephemeral=True)
 
     @kalender.command(name="entfernen", description="Rennen löschen (eine schon gepostete Anmeldung wird mitgelöscht)")
