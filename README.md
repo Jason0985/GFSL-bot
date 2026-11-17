@@ -279,6 +279,7 @@ Verpasst der Bot einen Zeitpunkt (z. B. Neustart), holt er ihn beim nächsten Du
 | **⚙️-Button an der Anmeldung** | Nur für Admins: Titel, Beschreibung, Start und Bild direkt am Event ändern. Wird der Start verschoben, berechnet der Bot Frist, Q-Sperren und Einteilung neu. |
 | `/anmeldung event teilnehmer eintrag: fahrer: status:` | Jemanden an-/abmelden oder austragen, z. B. wenn er per Nachricht Bescheid gegeben hat. |
 | `/anmeldung event q_sperre eintrag: fahrer: aufheben:` | Q-Sperre aufheben (gilt dann als rechtzeitig angemeldet, Stammfahrer bekommen ihren festen Platz zurück) oder setzen. |
+| `/anmeldung event anmeldungen_leeren eintrag: sicher:Ja` | Löscht alle An-/Abmeldungen eines Rennens (z. B. nach dem Verschieben). Die Nachricht bleibt und zeigt wieder leere Teams. |
 | `/anmeldung event neu_einteilen` | Ersatzfahrer komplett neu auslosen. |
 | `/anmeldung anwesenheit [vorlage] [oeffentlich]` | Alle Fahrer nach Anwesenheit sortiert (oben 100 %), mit ✅ angemeldet, ❔ vielleicht, ❌ abgemeldet, ➖ keine Rückmeldung, ⏰ zu spät. Darunter eine eigene Liste „Noch nie angemeldet“. |
 

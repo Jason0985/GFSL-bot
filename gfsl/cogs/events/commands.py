@@ -524,6 +524,32 @@ class EventsCog(commands.Cog):
             await actions.update_message(interaction.guild, d, ev)
         await interaction.followup.send(text, ephemeral=True)
 
+    @event.command(name="anmeldungen_leeren", description="Alle An-/Abmeldungen eines Rennens löschen (z. B. nach dem Verschieben)")
+    @app_commands.autocomplete(eintrag=event_autocomplete)
+    @app_commands.describe(sicher="Zur Sicherheit auf Ja stellen – alle Einträge sind danach weg")
+    async def anmeldungen_leeren(self, interaction: discord.Interaction, eintrag: str, sicher: bool):
+        d = D.get(interaction.guild_id)
+        ev = self.find_event(d, eintrag)
+        if ev is None:
+            return await reply(interaction, "Dieses Rennen gibt es nicht.")
+        if not sicher:
+            return await reply(interaction, "Nichts gelöscht. Zum Leeren `sicher: Ja` wählen.")
+        count = len(ev["signups"])
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        async with actions.lock(interaction.guild_id, ev["id"]):
+            ev["signups"], ev["assignments"], ev["next_order"] = {}, {}, 1
+            # Einteilungs-Nachricht passt nicht mehr: löschen, wird zur Frist bzw. bei neuen Anmeldungen neu angelegt
+            channel = interaction.guild.get_channel(ev.get("channel_id") or 0)
+            if channel and ev.get("assignment_message_id"):
+                try:
+                    await channel.get_partial_message(ev["assignment_message_id"]).delete()
+                except discord.HTTPException:
+                    pass
+            ev["assignment_message_id"] = None
+            storage.save()
+        await actions.update_message(interaction.guild, d, ev)
+        await interaction.followup.send(f"🧹 {count} Einträge bei **{D.field(d, ev, 'title')}** gelöscht.", ephemeral=True)
+
     @event.command(name="q_sperre", description="Q-Sperre (zu spät angemeldet) aufheben oder setzen, z. B. nach einer Test-Abmeldung")
     @app_commands.autocomplete(eintrag=event_autocomplete)
     @app_commands.describe(fahrer="Wer", aufheben="Ja = Q-Sperre weg, gilt als rechtzeitig angemeldet (Standard). Nein = Q-Sperre setzen")
